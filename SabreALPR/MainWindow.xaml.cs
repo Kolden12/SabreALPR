@@ -40,37 +40,42 @@ namespace SabreALPR
             ProcessCleanup();
         }
 
+// Inside your ProcessCleanup() method in MainWindow.xaml.cs
+
         private void ProcessCleanup()
         {
             try 
             {
                 // 1. DELETE UNVERIFIED IMAGES
-                // Logic: Find all files in local capture path not marked as 'Confirmed'
+                // Based on your script, verified reads start with "hit_"
                 var files = Directory.GetFiles(_localCapturePath);
                 foreach (var file in files)
                 {
-                    // If the filename doesn't contain "CONFIRMED" (or your specific ALPR software tag), delete it
-                    if (!file.Contains("CONFIRMED"))
+                    string fileName = Path.GetFileName(file);
+                    // If it doesn't start with 'hit_', it's a "miss" or junk—toss it.
+                    if (!fileName.StartsWith("hit_", StringComparison.OrdinalIgnoreCase))
                     {
                         File.Delete(file);
                     }
                 }
 
-                // 2. OFFLOAD TO HOME LAB VIA VPN
+                // 2. HOURLY OFFLOAD (VPN to Home Lab)
+                // Check if the Unifi VPN is active (can we see the server?)
                 if (Directory.Exists(_remoteServerPath))
                 {
-                    var confirmedFiles = Directory.GetFiles(_localCapturePath, "*CONFIRMED*");
-                    foreach (var file in confirmedFiles)
+                    var verifiedFiles = Directory.GetFiles(_localCapturePath, "hit_*");
+                    foreach (var file in verifiedFiles)
                     {
                         string destFile = Path.Combine(_remoteServerPath, Path.GetFileName(file));
-                        File.Move(file, destFile); // Move transfers the file and clears local space
+                        // Move clears local car storage and sends to your home lab
+                        File.Move(file, destFile, true); 
                     }
                 }
             }
             catch (Exception ex)
             {
-                // Log error to a local text file for troubleshooting in the field
-                File.AppendAllText("error_log.txt", $"{DateTime.Now}: {ex.Message}\n");
+                // Log locally so you can check it when the car is back at the shop
+                File.AppendAllText("sabre_debug.txt", $"{DateTime.Now}: {ex.Message}\n");
             }
         }
     }

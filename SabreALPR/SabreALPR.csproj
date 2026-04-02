@@ -11,6 +11,7 @@
 
   <ItemGroup>
     <PackageReference Include="LibVLCSharp.WPF" Version="3.9.6" />
+    <PackageReference Include="Microsoft.ML.OnnxRuntime.Gpu" Version="1.24.4" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
   </ItemGroup>
 
