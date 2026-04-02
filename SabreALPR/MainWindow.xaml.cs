@@ -9,74 +9,89 @@ namespace SabreALPR
 {
     public partial class MainWindow : Window
     {
-        private LibVLC _libVLC;
-        private MediaPlayer _mediaPlayer;
-        private Timer _cleanupTimer;
-        private string _localCapturePath = @"C:\SabreALPR\Captures";
-        private string _remoteServerPath = @"\\10.0.0.5\SabreBackups"; // Replace with your VPN Home Lab IP
+        private LibVLC? _libVLC;
+        private MediaPlayer? _mediaPlayer;
+        private System.Timers.Timer? _cleanupTimer;
+        
+        // Settings for Sabre Security Patrol Unit
+        private readonly string _localCapturePath = @"C:\SabreALPR\Captures";
+        private readonly string _remoteServerPath = @"\\10.0.0.5\SabreBackups"; // Change to your Home Lab VPN IP
 
         public MainWindow()
         {
             InitializeComponent();
-            Core.Initialize();
+            
+            // Ensure the capture directory exists so the app doesn't crash
+            if (!Directory.Exists(_localCapturePath))
+            {
+                Directory.CreateDirectory(_localCapturePath);
+            }
 
+            // Initialize VLC for the VSR-20 RTSP Stream
+            Core.Initialize();
             _libVLC = new LibVLC();
             _mediaPlayer = new MediaPlayer(_libVLC);
             LiveVideoFeed.MediaPlayer = _mediaPlayer;
 
-            // Start the Color Stream from the first camera
+            // Connect to the Color stream on the first camera (.100)
             var media = new Media(_libVLC, new Uri("rtsp://pi:12345@192.168.3.100:8080/camcolor"), ":network-caching=300");
             _mediaPlayer.Play(media);
 
-            // Initialize the Hourly Cleanup and Offload Timer
-            _cleanupTimer = new Timer(3600000); // 1 Hour in milliseconds
+            // Setup the 'Janitor' Timer (Runs every 1 hour)
+            _cleanupTimer = new System.Timers.Timer(3600000); 
             _cleanupTimer.Elapsed += OnCleanupTimerElapsed;
             _cleanupTimer.AutoReset = true;
             _cleanupTimer.Enabled = true;
         }
 
-        private void OnCleanupTimerElapsed(object sender, ElapsedEventArgs e)
+        private void OnCleanupTimerElapsed(object? sender, ElapsedEventArgs e)
         {
             ProcessCleanup();
         }
-
-// Inside your ProcessCleanup() method in MainWindow.xaml.cs
 
         private void ProcessCleanup()
         {
             try 
             {
-                // 1. DELETE UNVERIFIED IMAGES
-                // Based on your script, verified reads start with "hit_"
-                var files = Directory.GetFiles(_localCapturePath);
-                foreach (var file in files)
+                // 1. THE JANITOR: Delete unverified noise
+                var directory = new DirectoryInfo(_localCapturePath);
+                
+                // Look at files older than 10 minutes to allow current reads to finish
+                var oldFiles = directory.GetFiles().Where(f => f.LastWriteTime < DateTime.Now.AddMinutes(-10));
+
+                foreach (var file in oldFiles)
                 {
-                    string fileName = Path.GetFileName(file);
-                    // If it doesn't start with 'hit_', it's a "miss" or junk—toss it.
-                    if (!fileName.StartsWith("hit_", StringComparison.OrdinalIgnoreCase))
+                    // If the YOLO 'hit' didn't result in a 'verified' plate read, delete it.
+                    if (!file.Name.Contains("verified", StringComparison.OrdinalIgnoreCase))
                     {
-                        File.Delete(file);
+                        file.Delete();
                     }
                 }
 
-                // 2. HOURLY OFFLOAD (VPN to Home Lab)
-                // Check if the Unifi VPN is active (can we see the server?)
+                // 2. OFFLOAD: Move verified reads to Home Lab via Unifi VPN
                 if (Directory.Exists(_remoteServerPath))
                 {
-                    var verifiedFiles = Directory.GetFiles(_localCapturePath, "hit_*");
+                    var verifiedFiles = Directory.GetFiles(_localCapturePath, "*verified*");
                     foreach (var file in verifiedFiles)
                     {
-                        string destFile = Path.Combine(_remoteServerPath, Path.GetFileName(file));
-                        // Move clears local car storage and sends to your home lab
-                        File.Move(file, destFile, true); 
+                        string destPath = Path.Combine(_remoteServerPath, file.Name);
+                        File.Move(file.FullName, destPath, true);
                     }
                 }
             }
             catch (Exception ex)
             {
-                // Log locally so you can check it when the car is back at the shop
-                File.AppendAllText("sabre_debug.txt", $"{DateTime.Now}: {ex.Message}\n");
+                // Log errors to a local file for troubleshooting later
+                File.AppendAllText(Path.Combine(_localCapturePath, "sabre_log.txt"), $"{DateTime.Now}: {ex.Message}\n");
             }
+        }
+
+        protected override void OnClosed(EventArgs e)
+        {
+            _mediaPlayer?.Dispose();
+            _libVLC?.Dispose();
+            _cleanupTimer?.Dispose();
+            base.OnClosed(e);
         }
     }
 }
