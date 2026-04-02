@@ -1,10 +1,14 @@
 ﻿<Window x:Class="SabreALPR.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="SabreALPR Mobile Monitor" Height="600" Width="1000" Background="#1a1a1a">
+        xmlns:VLC="clr-namespace:LibVLCSharp.WPF;assembly=LibVLCSharp.WPF"
+        Title="SabreALPR - Patrol Unit 01 - San Antonio, TX" Height="600" Width="1000" Background="#1a1a1a">
     <Grid>
         <Grid.RowDefinitions>
-            <RowDefinition Height="2*" /> <RowDefinition Height="1*" /> <RowDefinition Height="1*" /> </Grid.RowDefinitions>
+            <RowDefinition Height="2*" />
+            <RowDefinition Height="1*" />
+            <RowDefinition Height="1*" />
+        </Grid.RowDefinitions>
 
         <Grid Grid.Row="0">
             <Grid.ColumnDefinitions>
@@ -12,7 +16,7 @@
                 <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
             <Border BorderBrush="#333" BorderThickness="2" Margin="5">
-                <Image Name="LiveVideoFeed" Stretch="Uniform" Source="https://via.placeholder.com/640x480?text=Live+VSR+Feed" />
+                <VLC:VideoView x:Name="LiveVideoFeed" />
             </Border>
             <Border Grid.Column="1" BorderBrush="#333" BorderThickness="2" Margin="5">
                 <Image Name="ConfirmedPlateImage" Stretch="Uniform" />
