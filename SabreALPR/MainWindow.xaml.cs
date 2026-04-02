@@ -45,12 +45,14 @@ namespace SabreALPR
             
             if (CameraList.Count == 0)
             {
+                // Default setup for your bench-test Avenger board
                 CameraList.Add(new CameraConfig { Name = "Front Center", IP = "192.168.3.102" });
             }
         }
 
         private void RefreshCameraMenu()
         {
+            if (ViewMenu == null) return;
             ViewMenu.Items.Clear();
             foreach (var cam in CameraList)
             {
@@ -64,19 +66,32 @@ namespace SabreALPR
         {
             if (_libVLC == null || _mediaPlayer == null) return;
 
-            // Updated logic for Avenger/Pi boards: Use HTTP and force MJPEG demuxer
-            // network-caching=800 helps stabilize the feed over the .1 to .3 VLAN hop
+            // Target the HTTP MJPEG stream found on port 8080
             string cameraUrl = $"http://{ip}:8080/camcolor";
             
+            // Optimized options for high-def Avenger streams across the .1 to .3 VLANs
             var mediaOptions = new[] 
             { 
-                ":network-caching=800", 
+                ":network-caching=1000", 
                 ":demux=mjpeg",
-                ":http-reconnect" 
+                ":http-reconnect",
+                ":no-audio",
+                ":http-continuous",
+                ":clock-synchro=0" // Disables sync to save CPU on the gaming rig/mobile PC
             };
 
-            using var media = new Media(_libVLC, new Uri(cameraUrl), mediaOptions);
-            _mediaPlayer.Play(media);
+            try 
+            {
+                // Stop previous stream if running to clear memory
+                if (_mediaPlayer.IsPlaying) _mediaPlayer.Stop();
+                
+                using var media = new Media(_libVLC, new Uri(cameraUrl), mediaOptions);
+                _mediaPlayer.Play(media);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"SabreALPR Connection Error: {ex.Message}");
+            }
         }
 
         private void AddCamera_Click(object sender, RoutedEventArgs e)
@@ -106,8 +121,9 @@ namespace SabreALPR
         {
             try {
                 Core.Initialize();
-                // Passing global arguments to handle the HTTP stream type more robustly
-                _libVLC = new LibVLC("--no-osd", "--verbose=1");
+                
+                // Hardware acceleration hints for your Gaming PC's GPU
+                _libVLC = new LibVLC("--no-osd", "--no-video-title-show", "--ffmpeg-hw", "--clock-jitter=0");
                 _mediaPlayer = new LibVLCSharp.Shared.MediaPlayer(_libVLC);
                 
                 if (LiveVideoFeed != null) 
@@ -115,15 +131,19 @@ namespace SabreALPR
                     LiveVideoFeed.MediaPlayer = _mediaPlayer;
                 }
 
+                // Auto-start the first camera in the list
                 if (CameraList.Count > 0) SwitchCamera(CameraList[0].IP);
             } catch (Exception ex) {
-                MessageBox.Show($"VLC Init Error: {ex.Message}");
+                MessageBox.Show($"VLC Engine Init Failure: {ex.Message}");
             }
         }
 
         private void Stealth_Click(object sender, RoutedEventArgs e)
         {
+            if (StealthMenu == null || BannerPanel == null || PlateText == null) return;
             bool isNight = StealthMenu.IsChecked;
+            
+            // Sabre Security standard: Dark Red for night operations
             BannerPanel.Background = isNight ? Brushes.Black : new SolidColorBrush(Color.FromRgb(44, 62, 80));
             PlateText.Foreground = isNight ? Brushes.DarkRed : new SolidColorBrush(Color.FromRgb(241, 196, 15));
         }
@@ -132,6 +152,7 @@ namespace SabreALPR
 
         protected override void OnClosed(EventArgs e)
         {
+            // Explicit cleanup to prevent background VLC processes from hanging
             _mediaPlayer?.Stop();
             _mediaPlayer?.Dispose();
             _libVLC?.Dispose();
