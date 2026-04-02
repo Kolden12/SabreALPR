@@ -3,17 +3,19 @@ AppName=SabreALPR Tactical Suite
 AppVersion=2.0
 DefaultDirName={commonpf}\SabreALPR
 DefaultGroupName=Sabre Security
-; This matches the 'path' in the Upload step above
 OutputBaseFilename=SabreALPR_Setup
 OutputDir=Output
 Compression=lzma
 SolidCompression=yes
-PrivilegesRequired=adminin
+; Fix for the Privileges error
+PrivilegesRequired=admin
+; Ensures it installs as a 64-bit app on the Toughbook
+ArchitecturesInstallIn64BitMode=x64
 
 [Files]
-; The main executable from your build folder
+; Main EXE
 Source: "SabreALPR\bin\Release\net8.0-windows\win-x64\publish\SabreALPR.exe"; DestDir: "{app}"; Flags: ignoreversion
-; Include any supporting DLLs
+; All supporting DLLs and JSON configs
 Source: "SabreALPR\bin\Release\net8.0-windows\win-x64\publish\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs
 
 [Dirs]
