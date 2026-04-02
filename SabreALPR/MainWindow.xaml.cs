@@ -63,7 +63,19 @@ namespace SabreALPR
         private void SwitchCamera(string ip)
         {
             if (_libVLC == null || _mediaPlayer == null) return;
-            using var media = new Media(_libVLC, new Uri($"rtsp://{ip}:8080/camcolor"), ":network-caching=300");
+
+            // Updated logic for Avenger/Pi boards: Use HTTP and force MJPEG demuxer
+            // network-caching=800 helps stabilize the feed over the .1 to .3 VLAN hop
+            string cameraUrl = $"http://{ip}:8080/camcolor";
+            
+            var mediaOptions = new[] 
+            { 
+                ":network-caching=800", 
+                ":demux=mjpeg",
+                ":http-reconnect" 
+            };
+
+            using var media = new Media(_libVLC, new Uri(cameraUrl), mediaOptions);
             _mediaPlayer.Play(media);
         }
 
@@ -94,9 +106,15 @@ namespace SabreALPR
         {
             try {
                 Core.Initialize();
-                _libVLC = new LibVLC();
+                // Passing global arguments to handle the HTTP stream type more robustly
+                _libVLC = new LibVLC("--no-osd", "--verbose=1");
                 _mediaPlayer = new LibVLCSharp.Shared.MediaPlayer(_libVLC);
-                if (LiveVideoFeed != null) LiveVideoFeed.MediaPlayer = _mediaPlayer;
+                
+                if (LiveVideoFeed != null) 
+                {
+                    LiveVideoFeed.MediaPlayer = _mediaPlayer;
+                }
+
                 if (CameraList.Count > 0) SwitchCamera(CameraList[0].IP);
             } catch (Exception ex) {
                 MessageBox.Show($"VLC Init Error: {ex.Message}");
@@ -114,6 +132,7 @@ namespace SabreALPR
 
         protected override void OnClosed(EventArgs e)
         {
+            _mediaPlayer?.Stop();
             _mediaPlayer?.Dispose();
             _libVLC?.Dispose();
             base.OnClosed(e);
