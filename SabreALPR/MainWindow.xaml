@@ -2,26 +2,27 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:VLC="clr-namespace:LibVLCSharp.WPF;assembly=LibVLCSharp.WPF"
-        Title="SabreALPR Tactical Suite" Height="700" Width="1100" Background="#1a1a1a">
+        Title="SabreALPR Tactical Suite" Height="750" Width="1200" Background="#1a1a1a">
     <DockPanel>
         <Menu DockPanel.Dock="Top" Background="#2c3e50" Foreground="White">
             <MenuItem Header="_File">
                 <MenuItem Header="Exit" Click="Exit_Click"/>
             </MenuItem>
-            <MenuItem Header="_View">
-                <MenuItem Header="Cam 1 (.100)" Click="SwitchCam_Click" Tag="100"/>
-                <MenuItem Header="Cam 2 (.101)" Click="SwitchCam_Click" Tag="101"/>
-                <MenuItem Header="Cam 3 (.102)" Click="SwitchCam_Click" Tag="102"/>
-                <MenuItem Header="Cam 4 (.103)" Click="SwitchCam_Click" Tag="103"/>
+            <MenuItem x:Name="ViewMenu" Header="_View" />
+            <MenuItem Header="_Tools">
+                <MenuItem Header="Manage Cameras" Click="ManageCameras_Click"/>
+                <MenuItem Header="Stealth Mode" Click="ToggleStealth_Click" IsCheckable="True"/>
             </MenuItem>
         </Menu>
 
         <StatusBar DockPanel.Dock="Bottom" Background="#111" Foreground="#888">
             <StatusBarItem>
                 <Ellipse x:Name="VlpStatusLed" Width="10" Height="10" Fill="Red" Margin="5,0"/>
+                <TextBlock Text="VLP LINK" VerticalAlignment="Center"/>
             </StatusBarItem>
             <StatusBarItem>
                 <Ellipse x:Name="VpnStatusLed" Width="10" Height="10" Fill="Red" Margin="5,0"/>
+                <TextBlock Text="VPN" VerticalAlignment="Center"/>
             </StatusBarItem>
         </StatusBar>
 
@@ -29,7 +30,7 @@
             <Grid.RowDefinitions>
                 <RowDefinition Height="*" />
                 <RowDefinition Height="Auto" />
-                <RowDefinition Height="150" />
+                <RowDefinition Height="180" />
             </Grid.RowDefinitions>
 
             <Grid Grid.Row="0">
@@ -38,14 +39,15 @@
                     <ColumnDefinition Width="*" />
                 </Grid.ColumnDefinitions>
                 <VLC:VideoView x:Name="LiveVideoFeed" Margin="5" />
-                <Image x:Name="ConfirmedPlateImage" Grid.Column="1" Margin="5" />
+                <Image x:Name="ConfirmedPlateImage" Grid.Column="1" Margin="5" Stretch="Uniform" />
             </Grid>
 
             <StackPanel x:Name="BannerPanel" Grid.Row="1" Background="#2c3e50" Margin="5">
-                <TextBlock x:Name="PlateText" Text="PLATE: ----" Foreground="#f1c40f" FontSize="36" HorizontalAlignment="Center"/>
+                <TextBlock x:Name="PlateText" Text="PLATE: ----" Foreground="#f1c40f" FontSize="42" FontWeight="Bold" HorizontalAlignment="Center"/>
+                <TextBlock x:Name="StateText" Text="STATE: --" Foreground="#f1c40f" FontSize="18" HorizontalAlignment="Center" Margin="0,-5,0,5"/>
             </StackPanel>
 
-            <DataGrid x:Name="HistoryGrid" Grid.Row="2" Margin="5" Background="#222" Foreground="White" IsReadOnly="True" />
+            <DataGrid x:Name="HistoryGrid" Grid.Row="2" Margin="5" Background="#222" Foreground="White" IsReadOnly="True" AutoGenerateColumns="True"/>
         </Grid>
     </DockPanel>
 </Window>

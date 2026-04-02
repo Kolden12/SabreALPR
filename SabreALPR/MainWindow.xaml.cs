@@ -1,9 +1,10 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.IO;
-using System.Net.Http;
-using System.Text;
+using System.Linq;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Media;
 using LibVLCSharp.Shared;
 using Newtonsoft.Json;
@@ -14,89 +15,85 @@ namespace SabreALPR
     {
         private LibVLC? _libVLC;
         private LibVLCSharp.Shared.MediaPlayer? _mediaPlayer;
-        private readonly string _cadEndpoint = "http://10.0.0.5:5000/api/alerts"; // Your Home Lab CAD IP
+        private readonly string _configPath = @"C:\SabreALPR\cameras.json";
+        public List<CameraDevice> Cameras { get; set; } = new List<CameraDevice>();
 
         public MainWindow()
         {
             InitializeComponent();
+            LoadCameraConfig();
             InitializeVLC();
-            ApplyTacticalDefaults();
+            BuildCameraMenu();
         }
 
-        private void ApplyTacticalDefaults()
+        private void LoadCameraConfig()
         {
-            // Auto-Stealth Logic: If between 8 PM and 6 AM, go Red-on-Black
-            int currentHour = DateTime.Now.Hour;
-            if (currentHour >= 20 || currentHour <= 6)
+            if (File.Exists(_configPath))
             {
-                SetStealthMode(true);
+                try {
+                    string json = File.ReadAllText(_configPath);
+                    Cameras = JsonConvert.DeserializeObject<List<CameraDevice>>(json) ?? new List<CameraDevice>();
+                } catch { Cameras = GetDefaultCameras(); }
+            }
+            else { Cameras = GetDefaultCameras(); SaveCameraConfig(); }
+        }
+
+        private List<CameraDevice> GetDefaultCameras() => new List<CameraDevice> {
+            new CameraDevice { Name = "Front Center", IP = "192.168.3.102" },
+            new CameraDevice { Name = "Front Right", IP = "192.168.3.101" }
+        };
+
+        private void SaveCameraConfig() => File.WriteAllText(_configPath, JsonConvert.SerializeObject(Cameras));
+
+        private void BuildCameraMenu()
+        {
+            ViewMenu.Items.Clear();
+            foreach (var cam in Cameras)
+            {
+                var item = new MenuItem { Header = cam.Name, Tag = cam.IP };
+                item.Click += (s, e) => SwitchToCamera(cam.IP);
+                ViewMenu.Items.Add(item);
+            }
+        }
+
+        private void SwitchToCamera(string ip)
+        {
+            if (_libVLC == null || _mediaPlayer == null) return;
+            var uri = new Uri($"rtsp://{ip}:8080/camcolor");
+            using var media = new Media(_libVLC, uri, ":network-caching=300");
+            _mediaPlayer.Play(media);
+        }
+
+        private void ManageCameras_Click(object sender, RoutedEventArgs e)
+        {
+            // Simple prompt logic for demo - in a full app, this would open a sub-window
+            string input = Microsoft.VisualBasic.Interaction.InputBox("Enter Name and IP (Name,IP):", "Add Camera", "Rear,192.168.3.104");
+            if (!string.IsNullOrEmpty(input) && input.Contains(","))
+            {
+                var parts = input.Split(',');
+                Cameras.Add(new CameraDevice { Name = parts[0], IP = parts[1] });
+                SaveCameraConfig();
+                BuildCameraMenu();
+                MessageBox.Show("Camera Added to Fleet.");
             }
         }
 
         private void InitializeVLC()
         {
-            try 
-            {
-                Core.Initialize();
-                _libVLC = new LibVLC();
-                _mediaPlayer = new LibVLCSharp.Shared.MediaPlayer(_libVLC);
-                
-                if (LiveVideoFeed != null)
-                {
-                    LiveVideoFeed.MediaPlayer = _mediaPlayer;
-                }
-
-                if (_libVLC != null)
-                {
-                    // Defaulting to Front-Center Camera (.102)
-                    var media = new Media(_libVLC, new Uri("rtsp://192.168.3.102:8080/camcolor"), ":network-caching=300");
-                    _mediaPlayer.Play(media);
-                }
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"VLC Engine Failure: {ex.Message}. Ensure 64-bit VLC is installed.");
-            }
+            Core.Initialize();
+            _libVLC = new LibVLC();
+            _mediaPlayer = new LibVLCSharp.Shared.MediaPlayer(_libVLC);
+            if (LiveVideoFeed != null) LiveVideoFeed.MediaPlayer = _mediaPlayer;
+            
+            // Start with first camera if available
+            if (Cameras.Count > 0) SwitchToCamera(Cameras[0].IP);
         }
 
-        private async void SendCadHeartbeat(string plate, string state)
+        private void ToggleStealth_Click(object sender, RoutedEventArgs e)
         {
-            try 
-            {
-                using var client = new HttpClient();
-                var payload = new {
-                    Unit = "Interceptor-1",
-                    Plate = plate,
-                    State = state,
-                    Timestamp = DateTime.Now,
-                    Lat = "29.4241", // Manual San Antonio Lat until GPS hardware is linked
-                    Lon = "-98.4936"
-                };
-
-                var content = new StringContent(JsonConvert.SerializeObject(payload), Encoding.UTF8, "application/json");
-                await client.PostAsync(_cadEndpoint, content);
-            }
-            catch { /* Patrol continues even if VPN is spotty */ }
-        }
-
-        private void SetStealthMode(bool enabled)
-        {
-            if (BannerPanel != null)
-            {
-                BannerPanel.Background = enabled ? Brushes.Black : new SolidColorBrush(Color.FromRgb(44, 62, 80));
-                PlateText.Foreground = enabled ? Brushes.DarkRed : new SolidColorBrush(Color.FromRgb(241, 196, 15));
-            }
-        }
-
-        private void SwitchCam_Click(object sender, RoutedEventArgs e)
-        {
-            if (_libVLC == null || _mediaPlayer == null) return;
-            if (sender is System.Windows.Controls.MenuItem item && item.Tag != null)
-            {
-                var uri = new Uri($"rtsp://192.168.3.{item.Tag}:8080/camcolor");
-                using var media = new Media(_libVLC, uri, ":network-caching=300");
-                _mediaPlayer.Play(media);
-            }
+            bool isStealth = ((MenuItem)sender).IsChecked;
+            BannerPanel.Background = isStealth ? Brushes.Black : new SolidColorBrush(Color.FromRgb(44, 62, 80));
+            PlateText.Foreground = isStealth ? Brushes.DarkRed : new SolidColorBrush(Color.FromRgb(241, 196, 15));
         }
 
         private void Exit_Click(object sender, RoutedEventArgs e) => Application.Current.Shutdown();
@@ -107,5 +104,11 @@ namespace SabreALPR
             _libVLC?.Dispose();
             base.OnClosed(e);
         }
+    }
+
+    public class CameraDevice
+    {
+        public string Name { get; set; } = "";
+        public string IP { get; set; } = "";
     }
 }
