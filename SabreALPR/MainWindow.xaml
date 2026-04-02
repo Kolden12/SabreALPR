@@ -1,13 +1,10 @@
 ﻿<Window x:Class="SabreALPR.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
-        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:VLC="clr-namespace:LibVLCSharp.WPF;assembly=LibVLCSharp.WPF"
-        mc:Ignorable="d"
         Title="SabreALPR Tactical Suite" Height="700" Width="1100" Background="#1a1a1a">
     <DockPanel>
-        <Menu DockPanel.Top="0" Background="#2c3e50" Foreground="White">
+        <Menu DockPanel.Dock="Top" Background="#2c3e50" Foreground="White">
             <MenuItem Header="_File">
                 <MenuItem Header="Exit" Click="Exit_Click"/>
             </MenuItem>
@@ -19,7 +16,7 @@
             </MenuItem>
         </Menu>
 
-        <StatusBar DockPanel.Bottom="0" Background="#111" Foreground="#888">
+        <StatusBar DockPanel.Dock="Bottom" Background="#111" Foreground="#888">
             <StatusBarItem>
                 <Ellipse x:Name="VlpStatusLed" Width="10" Height="10" Fill="Red" Margin="5,0"/>
             </StatusBarItem>

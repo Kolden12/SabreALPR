@@ -4,6 +4,7 @@ using LibVLCSharp.Shared;
 
 namespace SabreALPR
 {
+    // The 'partial' keyword is mandatory to link to the XAML
     public partial class MainWindow : Window
     {
         private LibVLC? _libVLC;
@@ -11,8 +12,7 @@ namespace SabreALPR
 
         public MainWindow()
         {
-            // This method is created in a hidden file during build. 
-            // It will only be found if the .csproj link is successful.
+            // This call should stop showing an error once the .csproj and .xaml are saved
             InitializeComponent();
             InitializeVLC();
         }
@@ -25,7 +25,6 @@ namespace SabreALPR
                 _libVLC = new LibVLC();
                 _mediaPlayer = new LibVLCSharp.Shared.MediaPlayer(_libVLC);
                 
-                // If the compiler still doesn't see this, the XAML parsing failed.
                 if (LiveVideoFeed != null)
                 {
                     LiveVideoFeed.MediaPlayer = _mediaPlayer;
