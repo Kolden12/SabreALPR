@@ -1,4 +1,4 @@
-name: Build SabreALPR EXE
+name: Build SabreALPR EXE and Installer
 
 on:
   push:
@@ -35,8 +35,14 @@ jobs:
           /p:PublishReadyToRun=true `
           /p:IncludeNativeLibrariesForSelfExtract=true
 
-    - name: Upload Build Artifact
+    - name: Compile Inno Setup Installer
+      uses: Minionguyjpro/Inno-Setup-Action@v1.2.2
+      with:
+        path: installer.iss
+        options: /O+
+
+    - name: Upload Installer Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: SabreALPR-Windows-Binary
-        path: SabreALPR/bin/Release/net8.0-windows/win-x64/publish/
+        name: SabreALPR-Tactical-Installer
+        path: Output/SabreALPR_Setup.exe
