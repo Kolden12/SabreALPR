@@ -17,32 +17,31 @@ jobs:
     - name: Checkout Repository
       uses: actions/checkout@v4
 
-    - name: Setup .NET
-      uses: actions/setup-dotnet@v4
+    - name: Setup Python
+      uses: actions/setup-python@v5
       with:
-        dotnet-version: 8.0.x
+        python-version: '3.10' # or whatever version is best
 
-    - name: Restore Dependencies
-      run: dotnet restore SabreALPR/SabreALPR.csproj
-
-    - name: Publish Windows EXE
+    - name: Install Dependencies
       run: |
-        dotnet publish SabreALPR/SabreALPR.csproj `
-          -c Release `
-          -r win-x64 `
-          --self-contained true `
-          /p:PublishSingleFile=true `
-          /p:PublishReadyToRun=true `
-          /p:IncludeNativeLibrariesForSelfExtract=true
+        cd SabrePatrolLPR
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pyinstaller
+
+    - name: Build with PyInstaller
+      run: |
+        cd SabrePatrolLPR
+        pyinstaller SabrePatrolLPR.spec
 
     - name: Compile Inno Setup Installer
       uses: Minionguyjpro/Inno-Setup-Action@v1.2.2
       with:
-        path: installer.iss
+        path: SabrePatrolLPR/installer.iss
         options: /O+
 
     - name: Upload Installer Artifact
       uses: actions/upload-artifact@v4
       with:
         name: SabreALPR-Tactical-Installer
-        path: Output/SabreALPR_Setup.exe
+        path: SabrePatrolLPR/Output/SabrePatrolLPR_Setup.exe
