@@ -1,7 +1,15 @@
 import json
 import os
+import sys
 
-CONFIG_FILE = "settings.json"
+# Get APPDATA folder, fallback to current dir
+appdata_dir = os.getenv('APPDATA')
+if appdata_dir:
+    CONFIG_DIR = os.path.join(appdata_dir, "SabrePatrolLPR")
+    os.makedirs(CONFIG_DIR, exist_ok=True)
+    CONFIG_FILE = os.path.join(CONFIG_DIR, "settings.json")
+else:
+    CONFIG_FILE = "settings.json"
 
 DEFAULT_CONFIG = {
     "cameras": [], # List of dicts: {"model": "VSR-20", "ip": "192.168.1.100"}
