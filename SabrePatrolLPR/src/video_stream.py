@@ -19,7 +19,7 @@ class VideoStreamThread(QThread):
         if model == "VSR-20":
             return f"rtsp://{ip}:554/stream1"
         elif model == "VSR-40":
-            return f"http://{ip}:8008/camcolor"
+            return f"http://{ip}:8080/camcolor"
         return ""
 
     def run(self):
