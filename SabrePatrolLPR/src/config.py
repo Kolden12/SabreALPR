@@ -1,6 +1,7 @@
 import json
 import os
 import sys
+import logging
 
 # Get APPDATA folder, fallback to current dir
 appdata_dir = os.getenv('APPDATA')
@@ -8,8 +9,20 @@ if appdata_dir:
     CONFIG_DIR = os.path.join(appdata_dir, "SabrePatrolLPR")
     os.makedirs(CONFIG_DIR, exist_ok=True)
     CONFIG_FILE = os.path.join(CONFIG_DIR, "settings.json")
+    LOG_FILE = os.path.join(CONFIG_DIR, "sabre.log")
 else:
+    CONFIG_DIR = "."
     CONFIG_FILE = "settings.json"
+    LOG_FILE = "sabre.log"
+
+# Setup global logger
+logging.basicConfig(
+    filename=LOG_FILE,
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+logging.getLogger().addHandler(logging.StreamHandler(sys.stdout))
 
 DEFAULT_CONFIG = {
     "cameras": [], # List of dicts: {"model": "VSR-20", "ip": "192.168.1.100"}
