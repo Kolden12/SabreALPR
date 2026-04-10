@@ -2,6 +2,5 @@ PyQt5
 opencv-python-headless
 requests
 pyinstaller
-onnxruntime
 paddlepaddle
 paddleocr
