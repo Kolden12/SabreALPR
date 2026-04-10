@@ -7,7 +7,6 @@ from datetime import datetime
 from PyQt5.QtCore import QThread, pyqtSignal
 
 # Import heavy ML libraries globally on main thread to avoid WinError 1114 in PyInstaller Windows
-import onnxruntime as ort
 from paddleocr import PaddleOCR
 
 from src.db_manager import DBManager
@@ -38,17 +37,17 @@ class ALPREngineThread(QThread):
     def _initialize_models(self):
         """Loads models lazily inside the thread."""
         try:
-            logging.info("Initializing ONNX Runtime and PaddleOCR models...")
+            logging.info("Initializing OpenCV DNN and PaddleOCR models...")
 
-            # Initialize ONNX inference sessions (CPU/GPU providers automatically selected by ONNX Runtime)
+            # Initialize OpenCV DNN models (read ONNX via cv2 instead of onnxruntime to bypass WinError 1114)
             if os.path.exists(YOLO_DET_MODEL_PATH):
-                self.det_model = ort.InferenceSession(YOLO_DET_MODEL_PATH)
+                self.det_model = cv2.dnn.readNetFromONNX(YOLO_DET_MODEL_PATH)
             else:
                 logging.error(f"YOLO ONNX detection model missing: {YOLO_DET_MODEL_PATH}")
                 self.det_model = None
 
             if os.path.exists(YOLO_CLS_MODEL_PATH):
-                self.cls_model = ort.InferenceSession(YOLO_CLS_MODEL_PATH)
+                self.cls_model = cv2.dnn.readNetFromONNX(YOLO_CLS_MODEL_PATH)
             else:
                 logging.error(f"YOLO ONNX classification model missing: {YOLO_CLS_MODEL_PATH}")
                 self.cls_model = None
@@ -115,16 +114,13 @@ class ALPREngineThread(QThread):
             if vehicle_crop.size == 0:
                 return "UnknownState", "UnknownMake", "UnknownModel"
 
-            # Run ONNX classifier inference
-            # Preprocess
+            # Run ONNX classifier inference using OpenCV DNN
             import numpy as np
             input_size = (224, 224) # Standard for YOLO classification
-            blob = cv2.resize(vehicle_crop, input_size)
-            blob = blob.transpose((2, 0, 1))[np.newaxis, :, :, :] / 255.0
-            blob = blob.astype(np.float32)
+            blob = cv2.dnn.blobFromImage(vehicle_crop, 1.0/255.0, input_size, swapRB=True, crop=False)
 
-            input_name = self.cls_model.get_inputs()[0].name
-            outputs = self.cls_model.run(None, {input_name: blob})[0]
+            self.cls_model.setInput(blob)
+            outputs = self.cls_model.forward()
 
             top_class_idx = np.argmax(outputs[0])
 
@@ -156,13 +152,10 @@ class ALPREngineThread(QThread):
         img_padded[(input_size - nh) // 2:(input_size - nh) // 2 + nh,
                    (input_size - nw) // 2:(input_size - nw) // 2 + nw] = img_resized
 
-        # HWC to CHW and normalize
-        blob = img_padded.transpose((2, 0, 1))[np.newaxis, :, :, :] / 255.0
-        blob = blob.astype(np.float32)
-
-        # Run inference
-        input_name = self.det_model.get_inputs()[0].name
-        outputs = self.det_model.run(None, {input_name: blob})[0] # Shape (1, 84, 8400)
+        # Run inference using OpenCV DNN
+        blob = cv2.dnn.blobFromImage(img_padded, 1.0/255.0, (input_size, input_size), swapRB=True, crop=False)
+        self.det_model.setInput(blob)
+        outputs = self.det_model.forward()
 
         predictions = np.squeeze(outputs).T # (8400, 84)
 

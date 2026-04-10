@@ -3,11 +3,6 @@ import os
 import platform
 
 # Preload heavy ML libraries globally on main thread to avoid WinError 1114 in PyInstaller Windows
-import onnxruntime as ort
-try:
-    import onnxruntime.capi._pybind_state # Force DLL load on main thread
-except ImportError:
-    pass
 from paddleocr import PaddleOCR
 
 from PyQt5.QtWidgets import (
