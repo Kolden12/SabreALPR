@@ -2,7 +2,13 @@ import sys
 import os
 import platform
 
-# Removed torch/c10.dll preload logic as we've shifted to ONNX/Paddle to resolve WinError 1114
+# Preload heavy ML libraries globally on main thread to avoid WinError 1114 in PyInstaller Windows
+import onnxruntime as ort
+try:
+    import onnxruntime.capi._pybind_state # Force DLL load on main thread
+except ImportError:
+    pass
+from paddleocr import PaddleOCR
 
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,

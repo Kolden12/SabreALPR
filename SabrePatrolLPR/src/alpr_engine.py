@@ -5,6 +5,11 @@ import uuid
 import logging
 from datetime import datetime
 from PyQt5.QtCore import QThread, pyqtSignal
+
+# Import heavy ML libraries globally on main thread to avoid WinError 1114 in PyInstaller Windows
+import onnxruntime as ort
+from paddleocr import PaddleOCR
+
 from src.db_manager import DBManager
 from src.config import CONFIG_DIR
 
@@ -34,8 +39,6 @@ class ALPREngineThread(QThread):
         """Loads models lazily inside the thread."""
         try:
             logging.info("Initializing ONNX Runtime and PaddleOCR models...")
-            import onnxruntime as ort
-            from paddleocr import PaddleOCR
 
             # Initialize ONNX inference sessions (CPU/GPU providers automatically selected by ONNX Runtime)
             if os.path.exists(YOLO_DET_MODEL_PATH):
