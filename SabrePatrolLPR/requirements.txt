@@ -1,6 +1,7 @@
 PyQt5
-opencv-python
+opencv-python-headless
 requests
 pyinstaller
-ultralytics
-easyocr
+onnxruntime
+paddlepaddle
+paddleocr
