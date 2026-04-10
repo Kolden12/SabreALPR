@@ -11,7 +11,10 @@ hidden_imports = ['cv2', 'requests', 'PyQt5', 'sqlite3', 'onnxruntime', 'paddleo
 hidden_imports += collect_submodules('paddleocr')
 hidden_imports += collect_submodules('paddle')
 
+# Gather ONNX and Paddle dynamic libraries explicitly
 binaries_list = []
+binaries_list += collect_dynamic_libs('onnxruntime')
+binaries_list += collect_dynamic_libs('paddle')
 
 a = Analysis(
     ['src/main_ui.py'],
