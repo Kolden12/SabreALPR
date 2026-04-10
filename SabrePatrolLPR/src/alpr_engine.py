@@ -11,19 +11,6 @@ from src.config import CONFIG_DIR
 YOLO_DET_MODEL_PATH = "yolo11n.pt"
 YOLO_CLS_MODEL_PATH = "yolov8n-cls.pt" # Placeholder for VMMR/State classifier
 
-# Initialize global engines safely
-import easyocr
-try:
-    from ultralytics import YOLO
-    det_model = YOLO(YOLO_DET_MODEL_PATH)
-    cls_model = YOLO(YOLO_CLS_MODEL_PATH)
-    reader = easyocr.Reader(['en'], gpu=True) # Will fallback to CPU if no CUDA
-except Exception as e:
-    print(f"Warning: Failed to load ALPR AI models locally: {e}")
-    det_model = None
-    cls_model = None
-    reader = None
-
 class ALPREngineThread(QThread):
     new_read_signal = pyqtSignal(dict, bool)
 
@@ -34,9 +21,25 @@ class ALPREngineThread(QThread):
         self.frame_queue = []
         self.recent_plates = {} # For 30s deduplication cache
 
+        self.det_model = None
+        self.cls_model = None
+        self.reader = None
+
         # Ensure local image save directory exists
         self.images_dir = os.path.join(CONFIG_DIR, "images")
         os.makedirs(self.images_dir, exist_ok=True)
+
+    def _initialize_models(self):
+        """Loads models lazily inside the thread to avoid DLL load errors on boot."""
+        try:
+            import easyocr
+            from ultralytics import YOLO
+            self.det_model = YOLO(YOLO_DET_MODEL_PATH)
+            self.cls_model = YOLO(YOLO_CLS_MODEL_PATH)
+            self.reader = easyocr.Reader(['en'], gpu=True) # Will fallback to CPU if no CUDA
+            print("ALPR AI models loaded successfully.")
+        except Exception as e:
+            print(f"Warning: Failed to load ALPR AI models locally: {e}")
 
     def enqueue_frames(self, cv_color, cv_ir):
         # Keep queue short to prevent memory leak / lag
@@ -78,7 +81,7 @@ class ALPREngineThread(QThread):
             return "Unknown"
 
     def _determine_vmmr(self, cv_color, box):
-        if cls_model is None:
+        if self.cls_model is None:
             return "UnknownState", "UnknownMake", "UnknownModel"
 
         try:
@@ -95,7 +98,7 @@ class ALPREngineThread(QThread):
                 return "UnknownState", "UnknownMake", "UnknownModel"
 
             # Run classifier inference
-            results = cls_model(vehicle_crop, verbose=False)
+            results = self.cls_model(vehicle_crop, verbose=False)
 
             # Assuming a custom trained cls model that returns strings like "TX_Ford_Explorer"
             if results and len(results) > 0:
@@ -113,6 +116,9 @@ class ALPREngineThread(QThread):
         return "UnknownState", "UnknownMake", "UnknownModel"
 
     def run(self):
+        # Initialize models when the thread actually starts execution
+        self._initialize_models()
+
         while self._run_flag:
             if not self.frame_queue:
                 time.sleep(0.05)
@@ -120,12 +126,12 @@ class ALPREngineThread(QThread):
 
             cv_color, cv_ir = self.frame_queue.pop(0)
 
-            if det_model is None or reader is None:
+            if self.det_model is None or self.reader is None:
                 continue
 
             # Stage 1: Detection (YOLO11n) on IR frame
             try:
-                results = det_model(cv_ir, verbose=False)
+                results = self.det_model(cv_ir, verbose=False)
                 for r in results:
                     boxes = r.boxes
                     for box in boxes:
@@ -140,7 +146,7 @@ class ALPREngineThread(QThread):
                             if plate_crop.size == 0:
                                 continue
 
-                            ocr_results = reader.readtext(plate_crop)
+                            ocr_results = self.reader.readtext(plate_crop)
                             if ocr_results:
                                 # Get the highest confidence text
                                 text_data = max(ocr_results, key=lambda x: x[2])
