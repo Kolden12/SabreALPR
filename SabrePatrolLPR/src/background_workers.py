@@ -47,10 +47,10 @@ class BackgroundWorkers:
         try:
             # Check if mapped
             if not os.path.exists(drive_letter):
-                # Execute securely without shell=True to avoid command injection with passwords
-                cmd = ["net", "use", drive_letter, unc_path, f"/user:{user}", password]
-                # Use DEVNULL to prevent password logging
-                subprocess.run(cmd, shell=False, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                # Execute securely without shell=True, and pipe the password via stdin to hide it from process lists
+                cmd = ["net", "use", drive_letter, unc_path, f"/user:{user}", "*"]
+                # Use DEVNULL for outputs to prevent logging, pass password via input
+                subprocess.run(cmd, input=f"{password}\n", text=True, shell=False, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             return f"{drive_letter}\\"
         except subprocess.CalledProcessError as e:
             print(f"Failed to map TrueNAS SMB share: {e}")

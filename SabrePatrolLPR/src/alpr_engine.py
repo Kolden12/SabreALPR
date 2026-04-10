@@ -53,7 +53,7 @@ class ALPREngineThread(QThread):
                 self.cls_model = None
 
             # Initialize PaddleOCR
-            self.reader = PaddleOCR(use_angle_cls=True, lang='en', device='gpu', show_log=False)
+            self.reader = PaddleOCR(use_angle_cls=True, lang='en')
             logging.info("ONNX and PaddleOCR initialized successfully.")
         except Exception as e:
             logging.error(f"Failed to load ALPR AI models locally: {e}")
