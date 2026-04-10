@@ -10,7 +10,7 @@ from PyQt5.QtMultimedia import QSound
 from src.settings_ui import SettingsDialog
 from src.config import load_config
 from src.video_stream import VideoStreamThread
-from src.data_monitor import DataMonitor
+from src.alpr_engine import ALPREngineThread
 from src.api_webhook import WebhookIntegration
 from src.background_workers import BackgroundWorkers
 import os
@@ -45,17 +45,12 @@ class MainWindow(QMainWindow):
         webhook_url = "https://webhook.site/68467d43-3e4e-423c-981f-4e8a28121249"
         self.webhook = WebhookIntegration(webhook_url, unit_id, self.drive_path)
 
-        # Start data monitoring
-        # Mocking Z: drive for testing locally by creating a dummy file
-        self.results_path = os.path.join(self.drive_path, "results.txt")
-        if not os.path.exists(self.results_path):
-            with open(self.results_path, 'w') as f:
-                pass
+        # Start Local ALPR Engine
+        self.alpr_engine = ALPREngineThread(self)
+        self.alpr_engine.new_read_signal.connect(self.handle_new_read)
+        self.alpr_engine.start()
 
-        self.data_monitor = DataMonitor(results_file=self.results_path)
-        self.data_monitor.new_read_signal.connect(self.handle_new_read)
-
-        # Start Background Workers (Cleanup and Offload)
+        # Start Background Workers (TrueNAS Offload)
         self.workers = BackgroundWorkers(self.config, drive_path=self.drive_path)
         self.workers.start()
 
@@ -154,18 +149,23 @@ class MainWindow(QMainWindow):
             cam_data = cameras[0]
 
         self.video_thread = VideoStreamThread(cam_data)
-        self.video_thread.change_pixmap_signal.connect(self.update_video_image)
+        self.video_thread.new_frame_signal.connect(self.handle_new_frame)
         self.video_thread.error_signal.connect(self.handle_video_error)
         self.video_thread.start()
 
-    @pyqtSlot(QImage)
-    def update_video_image(self, qt_image):
+    @pyqtSlot(QImage, object, object)
+    def handle_new_frame(self, qt_image, cv_color, cv_ir):
+        # Update UI with the Color Frame
         # Scale the image keeping aspect ratio
         scaled_pixmap = QPixmap.fromImage(qt_image).scaled(
             self.video_label.width(), self.video_label.height(),
             Qt.KeepAspectRatio, Qt.SmoothTransformation
         )
         self.video_label.setPixmap(scaled_pixmap)
+
+        # Enqueue raw frames to ALPR Engine
+        if hasattr(self, 'alpr_engine'):
+            self.alpr_engine.enqueue_frames(cv_color, cv_ir)
 
     @pyqtSlot(str)
     def handle_video_error(self, error_msg):
@@ -215,13 +215,10 @@ class MainWindow(QMainWindow):
         # Send API Webhook
         self.webhook.send_payload(read_data, is_hit)
 
-        # Optional: Load Last Verified Capture image from Z: drive
-        # We assume the image follows the YYYYMMDD_PLATE_Color.jpg convention
-        date_str = read_data['timestamp'].split(' ')[0].replace('-', '')
-        img_filename = f"{date_str}_{read_data['plate']}_Color.jpg"
-        img_path = os.path.join(os.path.dirname(self.results_path), img_filename)
+        # Load Last Verified Capture image directly from the payload path
+        img_path = read_data.get('color_path', '')
 
-        if os.path.exists(img_path):
+        if img_path and os.path.exists(img_path):
             pixmap = QPixmap(img_path)
             if not pixmap.isNull():
                 scaled_pixmap = pixmap.scaled(
@@ -237,8 +234,8 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         if self.video_thread is not None:
             self.video_thread.stop()
-        if hasattr(self, 'data_monitor'):
-            self.data_monitor.stop()
+        if hasattr(self, 'alpr_engine'):
+            self.alpr_engine.stop()
         if hasattr(self, 'workers'):
             self.workers.stop()
         super().closeEvent(event)
