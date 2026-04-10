@@ -2,14 +2,16 @@ import os
 import cv2
 import time
 import uuid
+import logging
 from datetime import datetime
 from PyQt5.QtCore import QThread, pyqtSignal
 from src.db_manager import DBManager
 from src.config import CONFIG_DIR
 
-# Optional: Add dummy/placeholder paths for YOLO models, to be replaced by user
-YOLO_DET_MODEL_PATH = "yolo11n.pt"
-YOLO_CLS_MODEL_PATH = "yolov8n-cls.pt" # Placeholder for VMMR/State classifier
+# Set YOLO paths explicitly to the APPDATA config dir so Ultralytics can download/save weights
+# without triggering PermissionErrors inside C:\Program Files
+YOLO_DET_MODEL_PATH = os.path.join(CONFIG_DIR, "yolo11n.pt")
+YOLO_CLS_MODEL_PATH = os.path.join(CONFIG_DIR, "yolov8n-cls.pt")
 
 class ALPREngineThread(QThread):
     new_read_signal = pyqtSignal(dict, bool)
@@ -32,14 +34,15 @@ class ALPREngineThread(QThread):
     def _initialize_models(self):
         """Loads models lazily inside the thread to avoid DLL load errors on boot."""
         try:
+            logging.info("Initializing local ALPR AI models (YOLO & EasyOCR)...")
             import easyocr
             from ultralytics import YOLO
             self.det_model = YOLO(YOLO_DET_MODEL_PATH)
             self.cls_model = YOLO(YOLO_CLS_MODEL_PATH)
             self.reader = easyocr.Reader(['en'], gpu=True) # Will fallback to CPU if no CUDA
-            print("ALPR AI models loaded successfully.")
+            logging.info("ALPR AI models loaded and initialized successfully.")
         except Exception as e:
-            print(f"Warning: Failed to load ALPR AI models locally: {e}")
+            logging.error(f"Failed to load ALPR AI models locally: {e}")
 
     def enqueue_frames(self, cv_color, cv_ir):
         # Keep queue short to prevent memory leak / lag
@@ -111,7 +114,7 @@ class ALPREngineThread(QThread):
                 return top_class_name, "Unknown", "Unknown"
 
         except Exception as e:
-            print(f"VMMR Error: {e}")
+            logging.error(f"VMMR Inference Error: {e}")
 
         return "UnknownState", "UnknownMake", "UnknownModel"
 
@@ -132,18 +135,27 @@ class ALPREngineThread(QThread):
             # Stage 1: Detection (YOLO11n) on IR frame
             try:
                 results = self.det_model(cv_ir, verbose=False)
+
+                # Check for any bounding box detections
+                found_boxes = False
                 for r in results:
-                    boxes = r.boxes
-                    for box in boxes:
+                    if len(r.boxes) > 0:
+                        found_boxes = True
+                    for box in r.boxes:
                         conf = float(box.conf[0])
-                        # E.g., class 0 = license_plate (assuming a custom trained yolo11n.pt, or standard if it supports it)
-                        # We trigger on confidence > 0.80 per user requirement
+                        cls_id = int(box.cls[0])
+
+                        # Logging the detection object
+                        logging.debug(f"YOLO detected object class {cls_id} with confidence {conf:.2f}")
+
+                        # Trigger on confidence > 0.80 per user requirement
                         if conf > 0.80:
                             x1, y1, x2, y2 = map(int, box.xyxy[0])
 
                             # Stage 2: OCR on crop
                             plate_crop = cv_ir[y1:y2, x1:x2]
                             if plate_crop.size == 0:
+                                logging.warning("YOLO detection yielded an empty crop. Skipping OCR.")
                                 continue
 
                             ocr_results = self.reader.readtext(plate_crop)
@@ -152,6 +164,8 @@ class ALPREngineThread(QThread):
                                 text_data = max(ocr_results, key=lambda x: x[2])
                                 plate_text = text_data[1].upper().replace(" ", "").replace("-", "")
                                 ocr_conf = float(text_data[2])
+
+                                logging.info(f"EasyOCR read: '{plate_text}' with confidence {ocr_conf:.2f}")
 
                                 # Process only if OCR confidence > 0.70
                                 if ocr_conf > 0.70:
@@ -209,9 +223,12 @@ class ALPREngineThread(QThread):
 
                                     # Emit to UI
                                     self.new_read_signal.emit(read_data, is_hit)
+                                    logging.info(f"Verified read emitted to UI/DB: {plate_text}")
+                                else:
+                                    logging.debug(f"OCR string '{plate_text}' rejected (confidence {ocr_conf:.2f} <= 0.70)")
 
             except Exception as e:
-                print(f"ALPR Engine Error: {e}")
+                logging.error(f"ALPR Engine Error during processing loop: {e}", exc_info=True)
 
     def stop(self):
         self._run_flag = False
