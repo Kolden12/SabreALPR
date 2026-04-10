@@ -2,12 +2,24 @@
 
 block_cipher = None
 
+from PyInstaller.utils.hooks import collect_submodules, collect_dynamic_libs
+
+# Collect extensive hidden imports and DLLs for Torch, EasyOCR, and Ultralytics
+hidden_imports = ['cv2', 'requests', 'PyQt5', 'sqlite3', 'easyocr', 'ultralytics', 'torch', 'torchvision']
+hidden_imports += collect_submodules('easyocr')
+hidden_imports += collect_submodules('ultralytics')
+hidden_imports += collect_submodules('torch')
+
+binaries_list = []
+binaries_list += collect_dynamic_libs('torch')
+binaries_list += collect_dynamic_libs('torchvision')
+
 a = Analysis(
     ['src/main_ui.py'],
     pathex=['.'],
-    binaries=[],
+    binaries=binaries_list,
     datas=[('assets/*', 'assets')],
-    hiddenimports=['cv2', 'requests', 'PyQt5'],
+    hiddenimports=hidden_imports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
