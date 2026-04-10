@@ -53,7 +53,7 @@ class ALPREngineThread(QThread):
                 self.cls_model = None
 
             # Initialize PaddleOCR
-            self.reader = PaddleOCR(use_angle_cls=True, lang='en', use_gpu=True, show_log=False)
+            self.reader = PaddleOCR(use_angle_cls=True, lang='en', device='gpu', show_log=False)
             logging.info("ONNX and PaddleOCR initialized successfully.")
         except Exception as e:
             logging.error(f"Failed to load ALPR AI models locally: {e}")
@@ -70,7 +70,7 @@ class ALPREngineThread(QThread):
 
     def _determine_color(self, cv_color, box):
         try:
-            x1, y1, x2, y2 = map(int, box.xyxy[0])
+            x1, y1, x2, y2 = map(int, box)
             # Expand bounding box slightly for color context (vehicle body)
             h, w = cv_color.shape[:2]
             cx1, cy1 = max(0, x1 - 50), max(0, y1 - 50)
