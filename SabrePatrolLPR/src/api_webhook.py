@@ -25,6 +25,9 @@ class WebhookIntegration:
 
     def send_payload(self, read_data, is_hit):
         """Executes the HTTP POST request in a separate thread."""
+        if not is_hit:
+            return  # Restrict webhook to Hot List hits only per user requirements
+
         def task():
             try:
                 # Extract date from timestamp to match image naming convention (YYYYMMDD)
@@ -38,12 +41,14 @@ class WebhookIntegration:
                     except Exception:
                         date_str = timestamp_str.split(' ')[0].replace('-', '')
 
-                plate = read_data.get('plate', '')
-                color_img_path = os.path.join(self.drive_path, f"{date_str}_{plate}_Color.jpg")
-                ir_img_path = os.path.join(self.drive_path, f"{date_str}_{plate}_IR.jpg")
+                # With local ALPR, the engine explicitly passes the absolute paths of the saved images
+                color_path = read_data.get('color_path', '')
+                ir_path = read_data.get('ir_path', '')
 
-                color_b64 = self.encode_image(color_img_path)
-                ir_b64 = self.encode_image(ir_img_path)
+                color_b64 = self.encode_image(color_path) if color_path else ""
+                ir_b64 = self.encode_image(ir_path) if ir_path else ""
+
+                plate = read_data.get('plate', '')
 
                 payload = {
                     "unit_id": self.unit_id,

@@ -4,88 +4,29 @@ import shutil
 import threading
 import subprocess
 from datetime import datetime
+from src.config import CONFIG_DIR
+from src.db_manager import DBManager
 
 class BackgroundWorkers:
-    def __init__(self, config, drive_path="Z:\\", results_file="results.txt"):
+    def __init__(self, config, drive_path="Z:\\"):
         self.config = config
-        self.drive_path = drive_path
-        self.results_file = os.path.join(drive_path, results_file)
+        # Target drive path logic
+        self.truenas_drive_letter = drive_path if os.name == 'nt' else "./archive"
         self._run_flag = True
+        self.db = DBManager()
 
-        # Load verified reads to track what NOT to delete during cleanup
-        self.verified_images = set()
+        # Local source directory where ALPR Engine saves images
+        self.local_images_dir = os.path.join(CONFIG_DIR, "images")
+        os.makedirs(self.local_images_dir, exist_ok=True)
 
-        # Threads
-        self.cleanup_thread = threading.Thread(target=self.cleanup_loop, daemon=True)
+        # Thread
         self.offload_thread = threading.Thread(target=self.offload_loop, daemon=True)
 
     def start(self):
-        self.cleanup_thread.start()
         self.offload_thread.start()
 
     def stop(self):
         self._run_flag = False
-
-    def update_verified_images(self):
-        """Parse the results.txt file to collect verified image patterns."""
-        self.verified_images.clear()
-        if not os.path.exists(self.results_file):
-            return
-
-        try:
-            with open(self.results_file, 'r', encoding='utf-8') as f:
-                for line in f:
-                    parts = line.strip().split(',')
-                    if len(parts) >= 6:
-                        timestamp_str = parts[0].strip()
-                        plate = parts[1].strip()
-                        # Extract date
-                        try:
-                            dt = datetime.strptime(timestamp_str, "%Y-%m-%d %H:%M:%S")
-                            date_str = dt.strftime("%Y%m%d")
-                        except Exception:
-                            date_str = timestamp_str.split(' ')[0].replace('-', '')
-
-                        # Add expected prefixes
-                        self.verified_images.add(f"{date_str}_{plate}")
-        except Exception as e:
-            print(f"Error reading verified images: {e}")
-
-    def cleanup_loop(self):
-        """Runs periodically to delete unverified .jpg files older than 5 minutes."""
-        while self._run_flag:
-            self.update_verified_images()
-
-            try:
-                current_time = time.time()
-                for filename in os.listdir(self.drive_path):
-                    if filename.endswith(".jpg"):
-                        filepath = os.path.join(self.drive_path, filename)
-
-                        # Check age
-                        file_age_seconds = current_time - os.path.getmtime(filepath)
-                        if file_age_seconds > 300: # 5 minutes
-
-                            # Check if verified
-                            is_verified = False
-                            for verified_pattern in self.verified_images:
-                                # Add underscore to ensure exact plate match (e.g., prevent ABC matching ABC123)
-                                if filename.startswith(verified_pattern + "_"):
-                                    is_verified = True
-                                    break
-
-                            if not is_verified:
-                                try:
-                                    os.remove(filepath)
-                                    print(f"Cleaned up unverified image: {filename}")
-                                except Exception as e:
-                                    print(f"Failed to delete {filename}: {e}")
-
-            except Exception as e:
-                print(f"Cleanup error: {e}")
-
-            # Run cleanup every minute
-            time.sleep(60)
 
     def _map_truenas(self):
         """Attempts to map the TrueNAS SMB share using net use on Windows."""
@@ -101,7 +42,7 @@ class BackgroundWorkers:
             return None
 
         unc_path = f"\\\\{ip}\\LPR_Archive"
-        drive_letter = "T:" # Target drive letter
+        drive_letter = "Z:" # Target drive letter
 
         try:
             # Check if mapped
@@ -112,43 +53,49 @@ class BackgroundWorkers:
                 subprocess.run(cmd, shell=False, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             return f"{drive_letter}\\"
         except subprocess.CalledProcessError as e:
-            print("Failed to map TrueNAS SMB share.")
+            print(f"Failed to map TrueNAS SMB share: {e}")
             return None
 
     def offload_loop(self):
-        """Runs periodically to shift verified hits older than 60 mins to TrueNAS."""
+        """Runs periodically to shift ALL local ALPR images older than 60 mins to TrueNAS."""
         while self._run_flag:
             try:
                 target_path = self._map_truenas()
                 # Fallback for testing/non-Windows
                 if not target_path and os.name != 'nt':
-                    target_path = "./archive"
+                    target_path = self.truenas_drive_letter
                     os.makedirs(target_path, exist_ok=True)
 
+                # If target_path is None, the VPN or TrueNAS is unreachable. Skip offload.
                 if target_path:
                     current_time = time.time()
-                    for filename in os.listdir(self.drive_path):
+                    moved_files = {}
+
+                    for filename in os.listdir(self.local_images_dir):
                         if filename.endswith(".jpg"):
-                            # Only shift verified images (others are handled by cleanup)
-                            is_verified = False
-                            for verified_pattern in self.verified_images:
-                                if filename.startswith(verified_pattern + "_"):
-                                    is_verified = True
-                                    break
+                            filepath = os.path.join(self.local_images_dir, filename)
+                            file_age_seconds = current_time - os.path.getmtime(filepath)
 
-                            if is_verified:
-                                filepath = os.path.join(self.drive_path, filename)
-                                file_age_seconds = current_time - os.path.getmtime(filepath)
+                            # Shift files older than 60 minutes
+                            if file_age_seconds > 3600:
+                                dest_path = os.path.join(target_path, filename)
+                                try:
+                                    # Atomic shift across drives
+                                    shutil.move(filepath, dest_path)
+                                    moved_files[filepath] = dest_path
+                                    print(f"Offloaded {filename} to TrueNAS.")
+                                except Exception as e:
+                                    print(f"Failed to offload {filename}: {e}")
 
-                                if file_age_seconds > 3600: # 60 minutes
-                                    dest_path = os.path.join(target_path, filename)
-                                    try:
-                                        shutil.move(filepath, dest_path) # Atomic shift across mapped drives
-                                        print(f"Offloaded {filename} to TrueNAS.")
-                                    except Exception as e:
-                                        print(f"Failed to offload {filename}: {e}")
+                    # Update SQLite database to point to the new paths on the Z: drive
+                    for old_path, new_path in moved_files.items():
+                        try:
+                            self.db.update_image_paths(old_path, new_path)
+                        except Exception as db_err:
+                            print(f"Failed to update SQLite path for {old_path}: {db_err}")
+
             except Exception as e:
                 print(f"Offload error: {e}")
 
-            # Run offload check every hour (3600s), polling every 10 mins for now
+            # Run offload check every 10 mins
             time.sleep(600)
