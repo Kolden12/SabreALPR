@@ -255,6 +255,16 @@ class MainWindow(QMainWindow):
             self.history_table.removeRow(10)
 
 def main():
+    # Force Windows to initialize the heavy C++ DLLs (like c10.dll) on the Main Thread
+    # before spinning up any background worker threads or PyQt GUI loops.
+    # This prevents [WinError 1114] DLL Initialization Routine Failed.
+    try:
+        import torch
+        import ultralytics
+        import easyocr
+    except Exception as e:
+        print(f"Warning: Main thread pre-load of AI libraries failed: {e}")
+
     app = QApplication(sys.argv)
     window = MainWindow()
     window.showMaximized()
