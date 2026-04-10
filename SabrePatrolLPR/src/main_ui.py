@@ -1,4 +1,27 @@
 import sys
+import os
+import platform
+
+# Solution 2: Pre-load c10.dll explicitly for Windows PyInstaller builds
+if platform.system() == "Windows":
+    import ctypes
+    from importlib.util import find_spec
+    try:
+        if (spec := find_spec("torch")) and spec.origin and os.path.exists(
+            dll_path := os.path.join(os.path.dirname(spec.origin), "lib", "c10.dll")
+        ):
+            ctypes.CDLL(os.path.normpath(dll_path))
+    except Exception as e:
+        print(f"Warning: Failed to pre-load c10.dll: {e}")
+
+# Solution 3: Import torch before PyQt to prevent DLL conflicts
+try:
+    import torch
+    import ultralytics
+    import easyocr
+except Exception as e:
+    print(f"Warning: Pre-load of AI libraries failed: {e}")
+
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QTableWidget, QTableWidgetItem, QHeaderView, QAction,
@@ -255,16 +278,6 @@ class MainWindow(QMainWindow):
             self.history_table.removeRow(10)
 
 def main():
-    # Force Windows to initialize the heavy C++ DLLs (like c10.dll) on the Main Thread
-    # before spinning up any background worker threads or PyQt GUI loops.
-    # This prevents [WinError 1114] DLL Initialization Routine Failed.
-    try:
-        import torch
-        import ultralytics
-        import easyocr
-    except Exception as e:
-        print(f"Warning: Main thread pre-load of AI libraries failed: {e}")
-
     app = QApplication(sys.argv)
     window = MainWindow()
     window.showMaximized()
