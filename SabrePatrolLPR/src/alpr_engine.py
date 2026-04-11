@@ -235,7 +235,7 @@ class ALPREngineThread(QThread):
                             logging.warning("YOLO detection yielded an empty crop. Skipping OCR.")
                             continue
 
-                        ocr_results = self.reader.ocr(plate_crop, cls=False)
+                        ocr_results = self.reader.ocr(plate_crop)
                         if ocr_results and ocr_results[0]:
                             # Get the highest confidence text
                             # PaddleOCR format: [[[[x, y], [x, y], [x, y], [x, y]], ('TEXT', CONFIDENCE)], ...]
