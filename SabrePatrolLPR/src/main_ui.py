@@ -8,7 +8,7 @@ from paddleocr import PaddleOCR
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QTableWidget, QTableWidgetItem, QHeaderView, QAction,
-    QFrame, QComboBox
+    QFrame, QComboBox, QTabWidget
 )
 from PyQt5.QtCore import Qt, pyqtSlot
 from PyQt5.QtGui import QFont, QColor, QPixmap, QImage
@@ -78,24 +78,30 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central_widget)
         main_layout = QVBoxLayout(central_widget)
 
-        # --- TOP ROW: Video and Image ---
+        # Global Camera Selector
+        self.camera_selector = QComboBox()
+        self.camera_selector.currentIndexChanged.connect(self.change_camera)
+        self.update_camera_selector()
+        main_layout.addWidget(self.camera_selector)
+
+        # Tab Widget
+        self.tabs = QTabWidget()
+        main_layout.addWidget(self.tabs)
+
+        # --- TAB 1: Main LPR Dashboard ---
+        self.dashboard_tab = QWidget()
+        dashboard_layout = QVBoxLayout(self.dashboard_tab)
+
+        # Dashboard TOP ROW: Video and Image
         top_layout = QHBoxLayout()
 
         # Left: Live Video (Color) container
         video_container = QVBoxLayout()
-
-        # Camera selector
-        self.camera_selector = QComboBox()
-        self.camera_selector.currentIndexChanged.connect(self.change_camera)
-        self.update_camera_selector()
-        video_container.addWidget(self.camera_selector)
-
         self.video_label = QLabel("Live Video Stream")
         self.video_label.setAlignment(Qt.AlignCenter)
         self.video_label.setStyleSheet("background-color: black; color: white;")
         self.video_label.setMinimumSize(960, 500)
         video_container.addWidget(self.video_label)
-
         top_layout.addLayout(video_container, stretch=1)
 
         # Right: Last Verified Capture
@@ -105,18 +111,18 @@ class MainWindow(QMainWindow):
         self.capture_label.setMinimumSize(960, 540)
         top_layout.addWidget(self.capture_label, stretch=1)
 
-        main_layout.addLayout(top_layout, stretch=5)
+        dashboard_layout.addLayout(top_layout, stretch=5)
 
-        # --- MIDDLE ROW: Hit Banner ---
+        # Dashboard MIDDLE ROW: Hit Banner
         self.hit_banner = QLabel("WAITING FOR DETECTIONS")
         self.hit_banner.setAlignment(Qt.AlignCenter)
         banner_font = QFont("Arial", 36, QFont.Bold)
         self.hit_banner.setFont(banner_font)
         self.hit_banner.setStyleSheet("background-color: #333; color: white; padding: 10px;")
         self.hit_banner.setMinimumHeight(100)
-        main_layout.addWidget(self.hit_banner, stretch=1)
+        dashboard_layout.addWidget(self.hit_banner, stretch=1)
 
-        # --- BOTTOM ROW: History Table ---
+        # Dashboard BOTTOM ROW: History Table
         self.history_table = QTableWidget(0, 6)
         self.history_table.setHorizontalHeaderLabels([
             "Timestamp", "Plate", "State", "Color", "Make", "Model"
@@ -126,8 +132,20 @@ class MainWindow(QMainWindow):
         # Font sizing for tactical display
         table_font = QFont("Arial", 14)
         self.history_table.setFont(table_font)
+        dashboard_layout.addWidget(self.history_table, stretch=4)
 
-        main_layout.addWidget(self.history_table, stretch=4)
+        self.tabs.addTab(self.dashboard_tab, "Main LPR Dashboard")
+
+        # --- TAB 2: IR Setup/Framing ---
+        self.ir_tab = QWidget()
+        ir_layout = QVBoxLayout(self.ir_tab)
+
+        self.ir_video_label = QLabel("IR Setup/Framing Stream")
+        self.ir_video_label.setAlignment(Qt.AlignCenter)
+        self.ir_video_label.setStyleSheet("background-color: black; color: white;")
+        ir_layout.addWidget(self.ir_video_label)
+
+        self.tabs.addTab(self.ir_tab, "IR Setup/Framing")
 
     def update_camera_selector(self):
         self.camera_selector.blockSignals(True)
@@ -159,15 +177,24 @@ class MainWindow(QMainWindow):
         self.video_thread.error_signal.connect(self.handle_video_error)
         self.video_thread.start()
 
-    @pyqtSlot(QImage, object, object)
-    def handle_new_frame(self, qt_image, cv_color, cv_ir):
-        # Update UI with the Color Frame
-        # Scale the image keeping aspect ratio
-        scaled_pixmap = QPixmap.fromImage(qt_image).scaled(
-            self.video_label.width(), self.video_label.height(),
-            Qt.KeepAspectRatio, Qt.SmoothTransformation
-        )
-        self.video_label.setPixmap(scaled_pixmap)
+    @pyqtSlot(QImage, QImage, object, object)
+    def handle_new_frame(self, qt_image_color, qt_image_ir, cv_color, cv_ir):
+        # Update UI with the Color Frame if on Dashboard Tab
+        if self.tabs.currentIndex() == 0:
+            # Scale the image keeping aspect ratio
+            scaled_pixmap = QPixmap.fromImage(qt_image_color).scaled(
+                self.video_label.width(), self.video_label.height(),
+                Qt.KeepAspectRatio, Qt.SmoothTransformation
+            )
+            self.video_label.setPixmap(scaled_pixmap)
+
+        # Update UI with the IR Frame if on IR Tab
+        elif self.tabs.currentIndex() == 1:
+            scaled_ir_pixmap = QPixmap.fromImage(qt_image_ir).scaled(
+                self.ir_video_label.width(), self.ir_video_label.height(),
+                Qt.KeepAspectRatio, Qt.SmoothTransformation
+            )
+            self.ir_video_label.setPixmap(scaled_ir_pixmap)
 
         # Enqueue raw frames to ALPR Engine
         if hasattr(self, 'alpr_engine'):

@@ -4,8 +4,8 @@ from PyQt5.QtCore import QThread, pyqtSignal, Qt
 from PyQt5.QtGui import QImage
 
 class VideoStreamThread(QThread):
-    # Emits (qt_image_color, raw_cv_color, raw_cv_ir)
-    new_frame_signal = pyqtSignal(QImage, object, object)
+    # Emits (qt_image_color, qt_image_ir, raw_cv_color, raw_cv_ir)
+    new_frame_signal = pyqtSignal(QImage, QImage, object, object)
     error_signal = pyqtSignal(str)
 
     def __init__(self, camera_config):
@@ -49,10 +49,19 @@ class VideoStreamThread(QThread):
                 rgb_image = cv2.cvtColor(cv_color, cv2.COLOR_BGR2RGB)
                 h, w, ch = rgb_image.shape
                 bytes_per_line = ch * w
-                qt_image = QImage(rgb_image.data, w, h, bytes_per_line, QImage.Format_RGB888)
+                qt_image_color = QImage(rgb_image.data, w, h, bytes_per_line, QImage.Format_RGB888)
 
-                # Emit QT image for UI, and raw CV frames for ALPR engine
-                self.new_frame_signal.emit(qt_image.copy(), cv_color, cv_ir)
+                # Convert the IR image to PyQt format for the UI (IR may be grayscale or BGR, but treat as BGR for conversion)
+                if len(cv_ir.shape) == 3:
+                    rgb_ir_image = cv2.cvtColor(cv_ir, cv2.COLOR_BGR2RGB)
+                else:
+                    rgb_ir_image = cv2.cvtColor(cv_ir, cv2.COLOR_GRAY2RGB)
+                h_ir, w_ir, ch_ir = rgb_ir_image.shape
+                bytes_per_line_ir = ch_ir * w_ir
+                qt_image_ir = QImage(rgb_ir_image.data, w_ir, h_ir, bytes_per_line_ir, QImage.Format_RGB888)
+
+                # Emit QT images for UI, and raw CV frames for ALPR engine
+                self.new_frame_signal.emit(qt_image_color.copy(), qt_image_ir.copy(), cv_color, cv_ir)
             else:
                 self.error_signal.emit("Stream disconnected, attempting reconnect...")
                 cap_color.release()

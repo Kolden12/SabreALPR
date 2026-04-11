@@ -2,5 +2,5 @@ PyQt5
 opencv-python-headless
 requests
 pyinstaller
-paddlepaddle
-paddleocr
+paddlepaddle==2.6.1
+paddleocr==2.8.1
