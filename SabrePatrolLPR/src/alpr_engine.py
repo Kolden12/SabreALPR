@@ -161,8 +161,8 @@ class ALPREngineThread(QThread):
 
         # Filter by confidence
         scores = np.max(predictions[:, 4:], axis=1)
-        predictions = predictions[scores > 0.80, :]
-        scores = scores[scores > 0.80]
+        predictions = predictions[scores > 0.20, :]
+        scores = scores[scores > 0.20]
 
         if len(predictions) == 0:
             return []
@@ -187,7 +187,7 @@ class ALPREngineThread(QThread):
         xyxy_boxes = np.column_stack((x1, y1, x2, y2))
 
         # NMS
-        indices = cv2.dnn.NMSBoxes(xyxy_boxes.tolist(), scores.tolist(), 0.80, 0.45)
+        indices = cv2.dnn.NMSBoxes(xyxy_boxes.tolist(), scores.tolist(), 0.20, 0.45)
 
         results = []
         if len(indices) > 0:
@@ -224,8 +224,8 @@ class ALPREngineThread(QThread):
 
                     logging.debug(f"YOLO ONNX detected object class {cls_id} with confidence {conf:.2f}")
 
-                    # Trigger on confidence > 0.80 per user requirement
-                    if conf > 0.80:
+                    # Trigger on confidence > 0.20 per user requirement
+                    if conf > 0.20:
                         box = r['box']
                         x1, y1, x2, y2 = map(int, box)
 
@@ -245,8 +245,8 @@ class ALPREngineThread(QThread):
 
                             logging.info(f"PaddleOCR read: '{plate_text}' with confidence {ocr_conf:.2f}")
 
-                            # Process only if OCR confidence > 0.70
-                            if ocr_conf > 0.70:
+                            # Process only if OCR confidence > 0.20
+                            if ocr_conf > 0.20:
                                 self.clean_dedup_cache()
                                 if plate_text in self.recent_plates:
                                     continue # Skip, recently seen
@@ -303,7 +303,7 @@ class ALPREngineThread(QThread):
                                 self.new_read_signal.emit(read_data, is_hit)
                                 logging.info(f"Verified read emitted to UI/DB: {plate_text}")
                             else:
-                                logging.debug(f"OCR string '{plate_text}' rejected (confidence {ocr_conf:.2f} <= 0.70)")
+                                logging.debug(f"OCR string '{plate_text}' rejected (confidence {ocr_conf:.2f} <= 0.20)")
 
             except Exception as e:
                 logging.error(f"ALPR Engine Error during processing loop: {e}", exc_info=True)
