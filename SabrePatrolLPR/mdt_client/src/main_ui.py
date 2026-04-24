@@ -3,7 +3,6 @@ import os
 import platform
 
 # Preload heavy ML libraries globally on main thread to avoid WinError 1114 in PyInstaller Windows
-from paddleocr import PaddleOCR
 
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
@@ -16,9 +15,6 @@ from PyQt5.QtMultimedia import QSound
 from src.settings_ui import SettingsDialog
 from src.config import load_config
 from src.video_stream import VideoStreamThread
-from src.alpr_engine import ALPREngineThread
-from src.api_webhook import WebhookIntegration
-from src.background_workers import BackgroundWorkers
 import os
 import sys
 
@@ -30,6 +26,57 @@ def get_asset_path(filename):
     except Exception:
         base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
     return os.path.join(base_path, "assets", filename)
+
+
+import websocket
+import json
+import base64
+from PyQt5.QtCore import QThread, pyqtSignal
+
+class WSClientThread(QThread):
+    new_read_signal = pyqtSignal(dict, bool, str, str) # data, is_hit, ir_b64, color_b64
+
+    def __init__(self, jetson_ip):
+        super().__init__()
+        self.jetson_ip = jetson_ip
+        self.run_flag = True
+
+    def run(self):
+        url = f"ws://{self.jetson_ip}:8000/ws"
+        while self.run_flag:
+            try:
+                self.ws = websocket.WebSocketApp(url,
+                                          on_message=self.on_message,
+                                          on_error=self.on_error,
+                                          on_close=self.on_close)
+                self.ws.run_forever()
+            except Exception as e:
+                import time
+                time.sleep(2) # Reconnect delay
+
+    def on_message(self, ws, message):
+        try:
+            payload = json.loads(message)
+            if payload.get("type") == "new_read":
+                self.new_read_signal.emit(
+                    payload["data"],
+                    payload["is_hit"],
+                    payload["ir_image_b64"],
+                    payload["color_image_b64"]
+                )
+        except Exception as e:
+            print(f"WS Parse Error: {e}")
+
+    def on_error(self, ws, error):
+        pass
+
+    def on_close(self, ws, close_status_code, close_msg):
+        pass
+
+    def stop(self):
+        self.run_flag = False
+        if hasattr(self, 'ws'):
+            self.ws.close()
 
 class MainWindow(QMainWindow):
     def __init__(self):

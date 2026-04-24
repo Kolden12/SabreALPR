@@ -1,7 +1,7 @@
 import sqlite3
 import os
 import threading
-from src.config import CONFIG_DIR
+from config import CONFIG_DIR
 
 # DB path in the user's APPDATA folder (or local dir)
 DB_PATH = os.path.join(CONFIG_DIR, "sabre_lpr_history.db")

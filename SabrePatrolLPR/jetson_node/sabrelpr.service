@@ -1,0 +1,15 @@
+[Unit]
+Description=Sabre Patrol LPR Jetson Node
+After=network.target
+
+[Service]
+User=root
+WorkingDirectory=/opt/SabrePatrolLPR/jetson_node
+ExecStart=/usr/bin/python3 main.py
+Restart=always
+RestartSec=5
+# Set environment variables for hardware acceleration if needed
+Environment="PYTHONUNBUFFERED=1"
+
+[Install]
+WantedBy=multi-user.target

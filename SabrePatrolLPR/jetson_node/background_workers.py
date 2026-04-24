@@ -4,8 +4,8 @@ import shutil
 import threading
 import subprocess
 from datetime import datetime
-from src.config import CONFIG_DIR
-from src.db_manager import DBManager
+from config import CONFIG_DIR
+from db_manager import DBManager
 
 class BackgroundWorkers:
     def __init__(self, config, drive_path="Z:\\"):

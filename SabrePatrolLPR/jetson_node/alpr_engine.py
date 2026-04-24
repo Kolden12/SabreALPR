@@ -4,23 +4,24 @@ import time
 import uuid
 import logging
 from datetime import datetime
-from PyQt5.QtCore import QThread, pyqtSignal
+import threading
 
 # Import heavy ML libraries globally on main thread to avoid WinError 1114 in PyInstaller Windows
 from paddleocr import PaddleOCR
+from ultralytics import YOLO
 
-from src.db_manager import DBManager
-from src.config import CONFIG_DIR
+from db_manager import DBManager
+from config import CONFIG_DIR
 
 # Set YOLO paths explicitly to the APPDATA config dir
 YOLO_DET_MODEL_PATH = os.path.join(CONFIG_DIR, "yolo11n.onnx")
 YOLO_CLS_MODEL_PATH = os.path.join(CONFIG_DIR, "yolov8n-cls.onnx")
 
-class ALPREngineThread(QThread):
-    new_read_signal = pyqtSignal(dict, bool)
+class ALPREngineThread(threading.Thread):
+    new_read_callbacks = []
 
-    def __init__(self, parent=None):
-        super().__init__(parent)
+    def __init__(self):
+        super().__init__()
         self._run_flag = True
         self.db = DBManager()
         self.frame_queue = []
@@ -39,17 +40,22 @@ class ALPREngineThread(QThread):
         try:
             logging.info("Initializing OpenCV DNN and PaddleOCR models...")
 
-            # Initialize OpenCV DNN models (read ONNX via cv2 instead of onnxruntime to bypass WinError 1114)
-            if os.path.exists(YOLO_DET_MODEL_PATH):
-                self.det_model = cv2.dnn.readNetFromONNX(YOLO_DET_MODEL_PATH)
-            else:
-                logging.error(f"YOLO ONNX detection model missing: {YOLO_DET_MODEL_PATH}")
-                self.det_model = None
+            # Initialize Native Ultralytics YOLO (Leverages TensorRT/CUDA automatically on Jetson if available)
+            try:
+                # Use .pt or .engine paths here. Defaults to .pt and Ultralytics handles TRT export if needed.
+                # Assuming models are in config dir. We will use native YOLO paths.
+                det_path = YOLO_DET_MODEL_PATH.replace('.onnx', '.pt')
+                if not os.path.exists(det_path):
+                    det_path = "yolo11n.pt" # Fallback to auto-download
+                self.det_model = YOLO(det_path)
 
-            if os.path.exists(YOLO_CLS_MODEL_PATH):
-                self.cls_model = cv2.dnn.readNetFromONNX(YOLO_CLS_MODEL_PATH)
-            else:
-                logging.error(f"YOLO ONNX classification model missing: {YOLO_CLS_MODEL_PATH}")
+                cls_path = YOLO_CLS_MODEL_PATH.replace('.onnx', '.pt')
+                if not os.path.exists(cls_path):
+                    cls_path = "yolov8n-cls.pt" # Fallback to auto-download
+                self.cls_model = YOLO(cls_path)
+            except Exception as e:
+                logging.error(f"Failed to load YOLO models: {e}")
+                self.det_model = None
                 self.cls_model = None
 
             # Initialize PaddleOCR
@@ -114,15 +120,10 @@ class ALPREngineThread(QThread):
             if vehicle_crop.size == 0:
                 return "UnknownState", "UnknownMake", "UnknownModel"
 
-            # Run ONNX classifier inference using OpenCV DNN
+            # Run Native YOLO classifier inference
             import numpy as np
-            input_size = (224, 224) # Standard for YOLO classification
-            blob = cv2.dnn.blobFromImage(vehicle_crop, 1.0/255.0, input_size, swapRB=True, crop=False)
-
-            self.cls_model.setInput(blob)
-            outputs = self.cls_model.forward()
-
-            top_class_idx = np.argmax(outputs[0])
+            results = self.cls_model(vehicle_crop, verbose=False)
+            top_class_idx = int(results[0].probs.top1)
 
             # Assuming a generic class mapping logic here, requires your specific training names
             top_class_name = f"Class_{top_class_idx}"
@@ -160,9 +161,11 @@ class ALPREngineThread(QThread):
         predictions = np.squeeze(outputs).T # (8400, 84)
 
         # Filter by confidence
+        # Lower confidence threshold from 0.80 to 0.40 since this is an IR license plate
+        # and YOLO can predict lower confidences but still have valid plate areas.
         scores = np.max(predictions[:, 4:], axis=1)
-        predictions = predictions[scores > 0.80, :]
-        scores = scores[scores > 0.80]
+        predictions = predictions[scores > 0.40, :]
+        scores = scores[scores > 0.40]
 
         if len(predictions) == 0:
             return []
@@ -186,8 +189,8 @@ class ALPREngineThread(QThread):
 
         xyxy_boxes = np.column_stack((x1, y1, x2, y2))
 
-        # NMS
-        indices = cv2.dnn.NMSBoxes(xyxy_boxes.tolist(), scores.tolist(), 0.80, 0.45)
+        # NMS - lowered score threshold from 0.80 to 0.40
+        indices = cv2.dnn.NMSBoxes(xyxy_boxes.tolist(), scores.tolist(), 0.40, 0.45)
 
         results = []
         if len(indices) > 0:
@@ -214,20 +217,27 @@ class ALPREngineThread(QThread):
             if self.det_model is None or self.reader is None:
                 continue
 
-            # Stage 1: Detection (YOLO11n) on IR frame via ONNX
+            # Stage 1: Detection (YOLO11n Native) on IR frame
             try:
-                results = self._process_onnx_yolo(cv_ir)
+                results = self.det_model(cv_ir, verbose=False, conf=0.40)
 
                 for r in results:
-                    conf = r['conf']
-                    cls_id = r['class_id']
+                    boxes = r.boxes
+                    for box in boxes:
+                        conf = float(box.conf[0])
+                        cls_id = int(box.cls[0])
 
-                    logging.debug(f"YOLO ONNX detected object class {cls_id} with confidence {conf:.2f}")
+                        logging.debug(f"YOLO Native detected object class {cls_id} with confidence {conf:.2f}")
 
-                    # Trigger on confidence > 0.80 per user requirement
-                    if conf > 0.80:
-                        box = r['box']
-                        x1, y1, x2, y2 = map(int, box)
+                        if conf > 0.40:
+                            x1, y1, x2, y2 = map(int, box.xyxy[0])
+
+                        # Ensure coordinates are within frame bounds to prevent empty or invalid crops
+                        h, w = cv_ir.shape[:2]
+                        x1 = max(0, min(x1, w - 1))
+                        y1 = max(0, min(y1, h - 1))
+                        x2 = max(0, min(x2, w))
+                        y2 = max(0, min(y2, h))
 
                         # Stage 2: OCR on crop via PaddleOCR
                         plate_crop = cv_ir[y1:y2, x1:x2]
@@ -245,8 +255,8 @@ class ALPREngineThread(QThread):
 
                             logging.info(f"PaddleOCR read: '{plate_text}' with confidence {ocr_conf:.2f}")
 
-                            # Process only if OCR confidence > 0.70
-                            if ocr_conf > 0.70:
+                            # Process if OCR confidence > 0.50 (lowered to catch valid plates that score low)
+                            if ocr_conf > 0.50:
                                 self.clean_dedup_cache()
                                 if plate_text in self.recent_plates:
                                     continue # Skip, recently seen
@@ -300,13 +310,21 @@ class ALPREngineThread(QThread):
                                 }
 
                                 # Emit to UI
-                                self.new_read_signal.emit(read_data, is_hit)
+                                for cb in self.new_read_callbacks:
+                                    try:
+                                        cb(read_data, is_hit)
+                                    except Exception as e:
+                                        logging.error(f"Callback error: {e}")
                                 logging.info(f"Verified read emitted to UI/DB: {plate_text}")
                             else:
                                 logging.debug(f"OCR string '{plate_text}' rejected (confidence {ocr_conf:.2f} <= 0.70)")
 
             except Exception as e:
                 logging.error(f"ALPR Engine Error during processing loop: {e}", exc_info=True)
+
+    @classmethod
+    def connect_signal(cls, callback):
+        cls.new_read_callbacks.append(callback)
 
     def stop(self):
         self._run_flag = False
