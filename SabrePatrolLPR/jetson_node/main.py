@@ -27,12 +27,48 @@ async def lifespan(app: FastAPI):
 
     # Start ALPR Engine
     from alpr_engine import ALPREngineThread
+
+    # Simple Video capture loop for Jetson
+    import cv2
+    import threading
+    import time
+    from config import load_config
+
+    def capture_loop(engine, cam_ip, cam_model):
+        if cam_model == "VSR-20":
+            url_color = f"rtsp://{cam_ip}:554/stream2"
+            url_ir = f"rtsp://{cam_ip}:554/stream1"
+        else:
+            url_color = f"http://{cam_ip}:8008/camcolor"
+            url_ir = f"http://{cam_ip}:8008/camir"
+
+        cap_c = cv2.VideoCapture(url_color)
+        cap_i = cv2.VideoCapture(url_ir)
+
+        while engine._run_flag:
+            ret_c, frame_c = cap_c.read()
+            ret_i, frame_i = cap_i.read()
+
+            if ret_c and ret_i:
+                # Limit queue size to prevent memory leaks if engine falls behind
+                if len(engine.frame_queue) < 10:
+                    engine.frame_queue.append((frame_c, frame_i))
+            else:
+                time.sleep(0.1) # Wait on network lag
+                # Attempt reconnect logic here in prod
+
     alpr_engine_instance = ALPREngineThread()
 
     # Connect signal to websocket broadcaster
     alpr_engine_instance.new_read_callbacks.append(broadcast_read)
 
     alpr_engine_instance.start()
+
+    config = load_config()
+    cameras = config.get("cameras", [])
+    if cameras:
+        cam1 = cameras[0] # Just primary camera for now as requested
+        threading.Thread(target=capture_loop, args=(alpr_engine_instance, cam1["ip"], cam1["model"]), daemon=True).start()
 
     # Start Background Workers (TrueNAS Offload & Webhooks)
     from background_workers import BackgroundWorkers
