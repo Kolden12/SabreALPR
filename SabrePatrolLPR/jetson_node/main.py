@@ -72,11 +72,15 @@ async def lifespan(app: FastAPI):
 
     # Start Background Workers (TrueNAS Offload & Webhooks)
     from background_workers import BackgroundWorkers
-    from api_webhook import WebhookIntegration
+    from config import load_config
+    config = load_config()
 
-    # We will spin these up using asyncio or threads depending on their structure later
+    bg_workers = BackgroundWorkers(config)
+    bg_workers.start()
 
     yield
+
+    bg_workers.stop()
 
     # Shutdown logic
     logging.info("Shutting down Jetson Node Services...")
@@ -103,6 +107,15 @@ def broadcast_read(read_data, is_hit):
         "ir_image_b64": encode_image(read_data.get('ir_path', '')),
         "color_image_b64": encode_image(read_data.get('color_path', ''))
     }
+
+    # Send Webhook
+    from api_webhook import WebhookIntegration
+    from config import load_config
+    config = load_config()
+    unit_id = config.get("unit_id", "SABRE-JETSON")
+    webhook_url = "https://webhook.site/68467d43-3e4e-423c-981f-4e8a28121249"
+    webhook = WebhookIntegration(webhook_url, unit_id, "./archive")
+    webhook.send_payload(read_data, is_hit)
 
     # Create an asyncio task to broadcast
     try:
@@ -145,15 +158,21 @@ async def websocket_endpoint(websocket: WebSocket):
 @app.post("/api/settings/cameras")
 async def update_cameras(settings: dict):
     """MDT posts camera settings here."""
-    # settings = {"cam1": {"type": "VSR-20", "ip": "192.168.1.100"}, ...}
+    from config import load_config, save_config
     logging.info(f"Received new camera configuration: {settings}")
 
-    if alpr_engine_instance:
-        # We need to restart streams
-        # Update config logic goes here
-        pass
+    # Save the new config locally on the Jetson
+    config = load_config()
+    config["cameras"] = settings.get("cameras", [])
+    save_config(config)
 
-    return {"status": "success"}
+    # NOTE: The simplest robust way to restart the capture threads and ALPR engine with new IP addresses
+    # is to let systemd restart the service. We will exit with status 0, and systemd `Restart=always` kicks in.
+    import sys
+    loop = asyncio.get_running_loop()
+    loop.call_later(1.0, sys.exit, 0)
+
+    return {"status": "success", "message": "Rebooting Jetson service to apply cameras..."}
 
 @app.post("/api/settings/watchlist")
 async def upload_watchlist(file: UploadFile = File(...)):

@@ -61,9 +61,9 @@ class BackgroundWorkers:
         while self._run_flag:
             try:
                 target_path = self._map_truenas()
-                # Fallback for testing/non-Windows
-                if not target_path and os.name != 'nt':
-                    target_path = self.truenas_drive_letter
+                # If mapping failed, fallback to local archive for resilience
+                if not target_path:
+                    target_path = "./archive"
                     os.makedirs(target_path, exist_ok=True)
 
                 # If target_path is None, the VPN or TrueNAS is unreachable. Skip offload.
