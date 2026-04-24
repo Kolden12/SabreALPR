@@ -179,12 +179,18 @@ class SettingsDialog(QDialog):
 
         save_config(self.config)
 
-        # Push config to Jetson Node
+        # Push ALL relevant config to Jetson Node
         import requests
         jetson_ip = self.config.get("jetson_ip")
         if jetson_ip:
+            payload = {
+                "cameras": cameras,
+                "truenas_ip": self.config.get("truenas_ip", ""),
+                "truenas_user": self.config.get("truenas_user", ""),
+                "truenas_password": self.config.get("truenas_password", "")
+            }
             try:
-                requests.post(f"http://{jetson_ip}:8000/api/settings/cameras", json={"cameras": cameras}, timeout=3)
+                requests.post(f"http://{jetson_ip}:8000/api/settings", json=payload, timeout=3)
             except Exception as e:
                 print(f"Failed to push settings to Jetson: {e}")
 

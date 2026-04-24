@@ -39,8 +39,8 @@ async def lifespan(app: FastAPI):
             url_color = f"rtsp://{cam_ip}:554/stream2"
             url_ir = f"rtsp://{cam_ip}:554/stream1"
         else:
-            url_color = f"http://{cam_ip}:8008/camcolor"
-            url_ir = f"http://{cam_ip}:8008/camir"
+            url_color = f"http://{cam_ip}:8080/camcolor"
+            url_ir = f"http://{cam_ip}:8080/camir"
 
         cap_c = cv2.VideoCapture(url_color)
         cap_i = cv2.VideoCapture(url_ir)
@@ -155,8 +155,8 @@ async def websocket_endpoint(websocket: WebSocket):
         connected_clients.remove(websocket)
         logging.info("MDT disconnected.")
 
-@app.post("/api/settings/cameras")
-async def update_cameras(settings: dict):
+@app.post("/api/settings")
+async def update_settings(settings: dict):
     """MDT posts camera settings here."""
     from config import load_config, save_config
     logging.info(f"Received new camera configuration: {settings}")
@@ -164,6 +164,12 @@ async def update_cameras(settings: dict):
     # Save the new config locally on the Jetson
     config = load_config()
     config["cameras"] = settings.get("cameras", [])
+    if "truenas_ip" in settings:
+        config["truenas_ip"] = settings["truenas_ip"]
+    if "truenas_user" in settings:
+        config["truenas_user"] = settings["truenas_user"]
+    if "truenas_password" in settings:
+        config["truenas_password"] = settings["truenas_password"]
     save_config(config)
 
     # NOTE: The simplest robust way to restart the capture threads and ALPR engine with new IP addresses
