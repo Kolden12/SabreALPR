@@ -4,16 +4,16 @@ sys.setrecursionlimit(sys.getrecursionlimit() * 5)
 
 block_cipher = None
 
-from PyInstaller.utils.hooks import collect_submodules, collect_dynamic_libs
+
 
 # Collect hidden imports for PaddleOCR and OpenCV
-hidden_imports = ['cv2', 'requests', 'PyQt5', 'sqlite3', 'paddleocr', 'paddle']
-hidden_imports += collect_submodules('paddleocr')
-hidden_imports += collect_submodules('paddle')
+hidden_imports = ['cv2', 'requests', 'PyQt5', 'sqlite3', 'websocket']
+
+
 
 # Gather Paddle dynamic libraries explicitly
 binaries_list = []
-binaries_list += collect_dynamic_libs('paddle')
+
 
 a = Analysis(
     ['src/main_ui.py'],

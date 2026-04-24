@@ -2,7 +2,7 @@ import sys
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QComboBox, QGroupBox, QFormLayout, QTableWidget,
-    QTableWidgetItem, QHeaderView, QMessageBox
+    QTableWidgetItem, QHeaderView, QMessageBox, QFileDialog
 )
 from src.config import load_config, save_config
 
@@ -22,7 +22,9 @@ class SettingsDialog(QDialog):
         general_group = QGroupBox("General Settings")
         general_layout = QFormLayout()
         self.unit_id_input = QLineEdit()
+        self.jetson_ip_input = QLineEdit()
         general_layout.addRow("Unit ID:", self.unit_id_input)
+        general_layout.addRow("Jetson Node IP:", self.jetson_ip_input)
         general_group.setLayout(general_layout)
         layout.addWidget(general_group)
 
@@ -53,6 +55,15 @@ class SettingsDialog(QDialog):
         cam_group.setLayout(cam_layout)
         layout.addWidget(cam_group)
 
+        # Watchlist Group
+        watchlist_group = QGroupBox("Hotlist (watchlist.csv)")
+        watchlist_layout = QVBoxLayout()
+        self.upload_wl_btn = QPushButton("Upload Watchlist to Jetson Node")
+        self.upload_wl_btn.clicked.connect(self.upload_watchlist)
+        watchlist_layout.addWidget(self.upload_wl_btn)
+        watchlist_group.setLayout(watchlist_layout)
+        layout.addWidget(watchlist_group)
+
         # TrueNAS / SMB Group
         nas_group = QGroupBox("TrueNAS SMB Settings")
         nas_layout = QFormLayout()
@@ -78,8 +89,32 @@ class SettingsDialog(QDialog):
         btn_layout.addWidget(cancel_btn)
         layout.addLayout(btn_layout)
 
+    def upload_watchlist(self):
+        filepath, _ = QFileDialog.getOpenFileName(self, "Select Watchlist", "", "CSV Files (*.csv)")
+        if not filepath:
+            return
+
+        jetson_ip = self.jetson_ip_input.text().strip()
+        if not jetson_ip:
+            QMessageBox.warning(self, "Error", "Please set and save the Jetson IP first.")
+            return
+
+        import requests
+        try:
+            with open(filepath, 'rb') as f:
+                files = {'file': (filepath, f, 'text/csv')}
+                resp = requests.post(f"http://{jetson_ip}:8000/api/settings/watchlist", files=files, timeout=5)
+
+            if resp.status_code == 200:
+                QMessageBox.information(self, "Success", "Watchlist uploaded to Jetson Node.")
+            else:
+                QMessageBox.warning(self, "Error", f"Upload failed: {resp.status_code}")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to connect to Jetson: {e}")
+
     def load_settings(self):
         self.unit_id_input.setText(self.config.get("unit_id", ""))
+        self.jetson_ip_input.setText(self.config.get("jetson_ip", "192.168.1.50"))
         self.nas_ip_input.setText(self.config.get("truenas_ip", ""))
         self.nas_user_input.setText(self.config.get("truenas_user", ""))
         self.nas_pass_input.setText(self.config.get("truenas_password", ""))
@@ -129,6 +164,7 @@ class SettingsDialog(QDialog):
 
     def save_settings(self):
         self.config["unit_id"] = self.unit_id_input.text().strip()
+        self.config["jetson_ip"] = self.jetson_ip_input.text().strip()
         self.config["truenas_ip"] = self.nas_ip_input.text().strip()
         self.config["truenas_user"] = self.nas_user_input.text().strip()
         self.config["truenas_password"] = self.nas_pass_input.text().strip()
@@ -142,4 +178,14 @@ class SettingsDialog(QDialog):
         self.config["cameras"] = cameras
 
         save_config(self.config)
+
+        # Push config to Jetson Node
+        import requests
+        jetson_ip = self.config.get("jetson_ip")
+        if jetson_ip:
+            try:
+                requests.post(f"http://{jetson_ip}:8000/api/settings/cameras", json={"cameras": cameras}, timeout=3)
+            except Exception as e:
+                print(f"Failed to push settings to Jetson: {e}")
+
         self.accept()

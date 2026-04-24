@@ -1,6 +1,5 @@
 PyQt5
 opencv-python-headless
 requests
+websocket-client
 pyinstaller
-paddlepaddle
-paddleocr

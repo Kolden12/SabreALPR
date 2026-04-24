@@ -1,35 +1,75 @@
 import sys
 import os
 import platform
-
-# Preload heavy ML libraries globally on main thread to avoid WinError 1114 in PyInstaller Windows
-from paddleocr import PaddleOCR
+import websocket
+import json
+import base64
 
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QTableWidget, QTableWidgetItem, QHeaderView, QAction,
     QFrame, QComboBox
 )
-from PyQt5.QtCore import Qt, pyqtSlot
+from PyQt5.QtCore import Qt, pyqtSlot, QThread, pyqtSignal
 from PyQt5.QtGui import QFont, QColor, QPixmap, QImage
 from PyQt5.QtMultimedia import QSound
 from src.settings_ui import SettingsDialog
 from src.config import load_config
 from src.video_stream import VideoStreamThread
-from src.alpr_engine import ALPREngineThread
-from src.api_webhook import WebhookIntegration
-from src.background_workers import BackgroundWorkers
 import os
 import sys
 
 def get_asset_path(filename):
-    """Get absolute path to resource, works for dev and for PyInstaller."""
     try:
-        # PyInstaller creates a temp folder and stores path in _MEIPASS
         base_path = sys._MEIPASS
     except Exception:
         base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
     return os.path.join(base_path, "assets", filename)
+
+class WSClientThread(QThread):
+    new_read_signal = pyqtSignal(dict, bool, str, str) # data, is_hit, ir_b64, color_b64
+
+    def __init__(self, jetson_ip):
+        super().__init__()
+        self.jetson_ip = jetson_ip
+        self.run_flag = True
+
+    def run(self):
+        url = f"ws://{self.jetson_ip}:8000/ws"
+        while self.run_flag:
+            try:
+                self.ws = websocket.WebSocketApp(url,
+                                          on_message=self.on_message,
+                                          on_error=self.on_error,
+                                          on_close=self.on_close)
+                self.ws.run_forever()
+            except Exception as e:
+                import time
+                time.sleep(2)
+
+    def on_message(self, ws, message):
+        try:
+            payload = json.loads(message)
+            if payload.get("type") == "new_read":
+                self.new_read_signal.emit(
+                    payload["data"],
+                    payload["is_hit"],
+                    payload["ir_image_b64"],
+                    payload["color_image_b64"]
+                )
+        except Exception as e:
+            print(f"WS Parse Error: {e}")
+
+    def on_error(self, ws, error):
+        pass
+
+    def on_close(self, ws, close_status_code, close_msg):
+        pass
+
+    def stop(self):
+        self.run_flag = False
+        if hasattr(self, 'ws'):
+            self.ws.close()
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -38,30 +78,33 @@ class MainWindow(QMainWindow):
         self.resize(1920, 1080)
         self.config = load_config()
         self.video_thread = None
+        self.ws_thread = None
+
         self.init_ui()
-        self.start_video_stream()
+        self.init_services()
 
-        # Audio setup
-        self.ding_sound = QSound(get_asset_path("ding.wav"))
-        self.siren_sound = QSound(get_asset_path("siren.wav"))
+        try:
+            self.ding_sound = QSound(get_asset_path("ding.wav"))
+            self.siren_sound = QSound(get_asset_path("siren.wav"))
+        except:
+            pass # Handle missing audio gracefully if QtMultimedia fails
 
-        # Webhook integration setup
-        self.drive_path = "Z:\\" if os.name == 'nt' else "./"
-        unit_id = self.config.get("unit_id", "SABRE-1")
-        webhook_url = "https://webhook.site/68467d43-3e4e-423c-981f-4e8a28121249"
-        self.webhook = WebhookIntegration(webhook_url, unit_id, self.drive_path)
+    def init_services(self):
+        cameras = self.config.get("cameras", [])
+        if cameras:
+            cam1 = cameras[0]
+            self.video_thread = VideoStreamThread(cam1)
+            self.video_thread.new_frame_signal.connect(self.handle_new_frame)
+            self.video_thread.error_signal.connect(self.handle_video_error)
+            self.video_thread.start()
 
-        # Start Local ALPR Engine
-        self.alpr_engine = ALPREngineThread(self)
-        self.alpr_engine.new_read_signal.connect(self.handle_new_read)
-        self.alpr_engine.start()
-
-        # Start Background Workers (TrueNAS Offload)
-        self.workers = BackgroundWorkers(self.config, drive_path=self.drive_path)
-        self.workers.start()
+        jetson_ip = self.config.get("jetson_ip", "192.168.1.50")
+        if jetson_ip:
+            self.ws_thread = WSClientThread(jetson_ip)
+            self.ws_thread.new_read_signal.connect(self.handle_new_read)
+            self.ws_thread.start()
 
     def init_ui(self):
-        # Setup Menu
         menubar = self.menuBar()
         file_menu = menubar.addMenu("File")
 
@@ -73,22 +116,12 @@ class MainWindow(QMainWindow):
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
 
-        # Central Widget & Layout
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         main_layout = QVBoxLayout(central_widget)
 
-        # --- TOP ROW: Video and Image ---
         top_layout = QHBoxLayout()
-
-        # Left: Live Video (Color) container
         video_container = QVBoxLayout()
-
-        # Camera selector
-        self.camera_selector = QComboBox()
-        self.camera_selector.currentIndexChanged.connect(self.change_camera)
-        self.update_camera_selector()
-        video_container.addWidget(self.camera_selector)
 
         self.video_label = QLabel("Live Video Stream")
         self.video_label.setAlignment(Qt.AlignCenter)
@@ -98,7 +131,6 @@ class MainWindow(QMainWindow):
 
         top_layout.addLayout(video_container, stretch=1)
 
-        # Right: Last Verified Capture
         self.capture_label = QLabel("Last Verified Capture")
         self.capture_label.setAlignment(Qt.AlignCenter)
         self.capture_label.setStyleSheet("background-color: #222; color: white;")
@@ -107,7 +139,6 @@ class MainWindow(QMainWindow):
 
         main_layout.addLayout(top_layout, stretch=5)
 
-        # --- MIDDLE ROW: Hit Banner ---
         self.hit_banner = QLabel("WAITING FOR DETECTIONS")
         self.hit_banner.setAlignment(Qt.AlignCenter)
         banner_font = QFont("Arial", 36, QFont.Bold)
@@ -116,62 +147,24 @@ class MainWindow(QMainWindow):
         self.hit_banner.setMinimumHeight(100)
         main_layout.addWidget(self.hit_banner, stretch=1)
 
-        # --- BOTTOM ROW: History Table ---
         self.history_table = QTableWidget(0, 6)
         self.history_table.setHorizontalHeaderLabels([
             "Timestamp", "Plate", "State", "Color", "Make", "Model"
         ])
         self.history_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.history_table.setAlternatingRowColors(True)
-        # Font sizing for tactical display
         table_font = QFont("Arial", 14)
         self.history_table.setFont(table_font)
 
         main_layout.addWidget(self.history_table, stretch=4)
 
-    def update_camera_selector(self):
-        self.camera_selector.blockSignals(True)
-        self.camera_selector.clear()
-        cameras = self.config.get("cameras", [])
-        for i, cam in enumerate(cameras):
-            self.camera_selector.addItem(f"Cam {i+1} ({cam['model']}) - {cam['ip']}", cam)
-        self.camera_selector.blockSignals(False)
-
-    def change_camera(self, index):
-        if index >= 0:
-            cam_data = self.camera_selector.itemData(index)
-            self.start_video_stream(cam_data)
-
-    def start_video_stream(self, cam_data=None):
-        if self.video_thread is not None:
-            self.video_thread.stop()
-            self.video_thread = None
-
-        if cam_data is None:
-            cameras = self.config.get("cameras", [])
-            if not cameras:
-                self.video_label.setText("No cameras configured.")
-                return
-            cam_data = cameras[0]
-
-        self.video_thread = VideoStreamThread(cam_data)
-        self.video_thread.new_frame_signal.connect(self.handle_new_frame)
-        self.video_thread.error_signal.connect(self.handle_video_error)
-        self.video_thread.start()
-
     @pyqtSlot(QImage, object, object)
     def handle_new_frame(self, qt_image, cv_color, cv_ir):
-        # Update UI with the Color Frame
-        # Scale the image keeping aspect ratio
         scaled_pixmap = QPixmap.fromImage(qt_image).scaled(
             self.video_label.width(), self.video_label.height(),
             Qt.KeepAspectRatio, Qt.SmoothTransformation
         )
         self.video_label.setPixmap(scaled_pixmap)
-
-        # Enqueue raw frames to ALPR Engine
-        if hasattr(self, 'alpr_engine'):
-            self.alpr_engine.enqueue_frames(cv_color, cv_ir)
 
     @pyqtSlot(str)
     def handle_video_error(self, error_msg):
@@ -181,12 +174,11 @@ class MainWindow(QMainWindow):
         dialog = SettingsDialog(self)
         if dialog.exec_():
             self.config = load_config()
-            self.update_camera_selector()
-            self.start_video_stream()
-            # Update Webhook unit_id
-            self.webhook.unit_id = self.config.get("unit_id", "SABRE-1")
-            # Update Background Workers config
-            self.workers.config = self.config
+            if self.video_thread is not None:
+                self.video_thread.stop()
+            if self.ws_thread is not None:
+                self.ws_thread.stop()
+            self.init_services()
 
     def update_hit_banner(self, plate, state, color, make, model, is_hit=False):
         text = f"PLATE: {plate} | STATE: {state} | COLOR: {color} | MAKE: {make} | MODEL: {model}"
@@ -196,59 +188,48 @@ class MainWindow(QMainWindow):
         else:
             self.hit_banner.setStyleSheet("background-color: green; color: white; padding: 10px;")
 
-    @pyqtSlot(dict, bool)
-    def handle_new_read(self, read_data, is_hit):
-        # Update Hit Banner
+    @pyqtSlot(dict, bool, str, str)
+    def handle_new_read(self, read_data, is_hit, ir_b64, color_b64):
         self.update_hit_banner(
             read_data['plate'], read_data['state'],
             read_data['color'], read_data['make'],
             read_data['model'], is_hit
         )
 
-        # Add to history
         self.add_history_entry(
             read_data['timestamp'], read_data['plate'],
             read_data['state'], read_data['color'],
             read_data['make'], read_data['model']
         )
 
-        # Play Audio
-        if is_hit:
-            self.siren_sound.play()
-        else:
-            self.ding_sound.play()
-
-        # Send API Webhook
-        self.webhook.send_payload(read_data, is_hit)
-
-        # Load Last Verified Capture image directly from the payload path
-        img_path = read_data.get('color_path', '')
-
-        if img_path and os.path.exists(img_path):
-            pixmap = QPixmap(img_path)
-            if not pixmap.isNull():
-                scaled_pixmap = pixmap.scaled(
-                    self.capture_label.width(), self.capture_label.height(),
-                    Qt.KeepAspectRatio, Qt.SmoothTransformation
-                )
-                self.capture_label.setPixmap(scaled_pixmap)
+        if hasattr(self, 'siren_sound') and hasattr(self, 'ding_sound'):
+            if is_hit:
+                self.siren_sound.play()
             else:
+                self.ding_sound.play()
+
+        if color_b64:
+            try:
+                img_data = base64.b64decode(color_b64)
+                image = QImage.fromData(img_data)
+                pixmap = QPixmap.fromImage(image)
+                self.capture_label.setPixmap(pixmap.scaled(
+                    self.capture_label.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation
+                ))
+            except Exception as e:
                 self.capture_label.setText("Image Corrupted")
         else:
-            self.capture_label.setText("Waiting for Image...")
+            self.capture_label.setText("No Image Received")
 
     def closeEvent(self, event):
         if self.video_thread is not None:
             self.video_thread.stop()
-        if hasattr(self, 'alpr_engine'):
-            self.alpr_engine.stop()
-        if hasattr(self, 'workers'):
-            self.workers.stop()
+        if self.ws_thread is not None:
+            self.ws_thread.stop()
         super().closeEvent(event)
 
     def add_history_entry(self, timestamp, plate, state, color, make, model):
-        self.history_table.insertRow(0) # Insert at top
-
+        self.history_table.insertRow(0)
         self.history_table.setItem(0, 0, QTableWidgetItem(timestamp))
         self.history_table.setItem(0, 1, QTableWidgetItem(plate))
         self.history_table.setItem(0, 2, QTableWidgetItem(state))
@@ -256,7 +237,6 @@ class MainWindow(QMainWindow):
         self.history_table.setItem(0, 4, QTableWidgetItem(make))
         self.history_table.setItem(0, 5, QTableWidgetItem(model))
 
-        # Keep only last 10 entries
         if self.history_table.rowCount() > 10:
             self.history_table.removeRow(10)
 
