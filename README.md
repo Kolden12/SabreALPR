@@ -12,11 +12,20 @@ To maximize performance in a vehicular environment, the suite utilizes a split-c
 ## General Download & Setup Instructions
 
 ### 1. Download
-Clone this repository to your local machine:
+
+**For the Windows MDT Client (End Users):**
+Do **not** download the source code ZIP. You need the pre-compiled `.exe` installer.
+1. Go to the **Actions** tab at the top of this GitHub repository.
+2. Click on the most recent successful workflow run (green checkmark).
+3. Scroll down to the **Artifacts** section at the bottom.
+4. Download the `SabreALPR-Tactical-Installer` zip file, which contains the `SabrePatrolLPR_Setup.exe`.
+*(Alternatively, check the **Releases** page on the right side of the GitHub repository).*
+
+**For the Jetson Node (Administrators):**
+Clone this repository directly onto your Jetson device:
 ```bash
 git clone https://github.com/your-org/SabrePatrolLPR.git
 ```
-Alternatively, download the latest Release `.zip` from the Releases page.
 
 ### 2. Jetson Node Installation (Compute)
 1. Transfer the `jetson_node/` directory to your Nvidia Jetson Orin Nano.

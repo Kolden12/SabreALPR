@@ -4,10 +4,30 @@ This directory contains the tactical user interface for the Sabre Patrol LPR sys
 
 ## Installation
 
-1. Obtain the latest `SabrePatrolLPR_Installer.exe`.
-2. Run the installer. It will guide you through a standard Windows installation process.
-3. The installer will automatically place a shortcut on your Desktop.
-4. Double-click the shortcut to launch the suite.
+There are two ways to get the MDT Client running on your machine:
+
+### Method 1: Pre-compiled Installer (Recommended)
+This is the easiest method. You do not need to deal with source code or `.iss` files.
+
+1. Go to the GitHub repository page.
+2. Click on the **Actions** tab at the top.
+3. Click on the most recent successful workflow run (look for the green checkmark).
+4. Scroll to the bottom of the summary page to the **Artifacts** section.
+5. Download the `SabreALPR-Tactical-Installer` archive.
+6. Extract the zip file and run `SabrePatrolLPR_Setup.exe`.
+7. Follow the installation wizard. It will create a shortcut on your Desktop.
+
+### Method 2: Compile from Source (Advanced)
+If you downloaded the source code ZIP and only see `installer.iss`, you must compile the application yourself.
+
+1. Install [Python 3.10+](https://www.python.org/downloads/).
+2. Open a command prompt or PowerShell in the `mdt_client` directory.
+3. Install dependencies: `pip install -r requirements.txt` and `pip install pyinstaller`
+4. Build the executable: `pyinstaller SabrePatrolLPR.spec`
+5. Download and install [Inno Setup 6](https://jrsoftware.org/isdl.php).
+6. Double-click the `installer.iss` file to open it in Inno Setup.
+7. Click the **Compile** button (or press Ctrl+F9).
+8. The final `SabrePatrolLPR_Setup.exe` will be generated inside the `Output/` folder.
 
 ## Initial Setup & Configuration
 
