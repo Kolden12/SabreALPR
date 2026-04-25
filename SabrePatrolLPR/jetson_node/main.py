@@ -1,6 +1,9 @@
 import os
 import asyncio
 import logging
+import signal
+import sys
+import time
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, UploadFile, File, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
@@ -9,32 +12,74 @@ import uvicorn
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
-# Global reference to ALPR engine
+# Global references
 alpr_engine_instance = None
+video_source_color = None
+video_source_ir = None
 
 # Connected WebSocket clients (MDTs)
 connected_clients = set()
 
+def signal_handler(sig, frame):
+    logging.info("Interrupt signal received. Shutting down...")
+    # Trigger clean exit
+    if alpr_engine_instance:
+        alpr_engine_instance.stop()
+
+    # Give it a moment to stop
+    time.sleep(1)
+
+    # Close video sources to release hardware resources
+    if video_source_color:
+        video_source_color.Close()
+        globals()['video_source_color'] = None
+    if video_source_ir:
+        video_source_ir.Close()
+        globals()['video_source_ir'] = None
+
+    sys.exit(0)
+
+# Register signal handlers
+signal.signal(signal.SIGINT, signal_handler)
+signal.signal(signal.SIGTERM, signal_handler)
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup logic
-    global alpr_engine_instance
+    global alpr_engine_instance, video_source_color, video_source_ir
     logging.info("Starting Jetson Node Services...")
 
-    # Initialize DB & Tables if needed
+    # Initialize DB & Tables
     from db_manager import DBManager
     db = DBManager()
 
     # Start ALPR Engine
     from alpr_engine import ALPREngineThread
 
-    # Simple Video capture loop for Jetson
-    import cv2
+    # Jetson-native capture loop using jetson_utils.videoSource
+    try:
+        import jetson.utils
+    except ImportError:
+        try:
+            from mock_jetson import utils_mod as utils
+            import sys
+            from types import ModuleType
+            if 'jetson' not in sys.modules:
+                jetson = ModuleType("jetson")
+                sys.modules["jetson"] = jetson
+            else:
+                jetson = sys.modules["jetson"]
+            jetson.utils = utils
+            sys.modules["jetson.utils"] = utils
+        except ImportError:
+            logging.warning("Jetson utils not found and mock_jetson failed to load.")
+
     import threading
-    import time
     from config import load_config
 
     def capture_loop(engine, cam_ip, cam_model):
+        global video_source_color, video_source_ir
+
         if cam_model == "VSR-20":
             url_color = f"rtsp://{cam_ip}:554/stream2"
             url_ir = f"rtsp://{cam_ip}:554/stream1"
@@ -42,20 +87,27 @@ async def lifespan(app: FastAPI):
             url_color = f"http://{cam_ip}:8008/camcolor"
             url_ir = f"http://{cam_ip}:8008/camir"
 
-        cap_c = cv2.VideoCapture(url_color)
-        cap_i = cv2.VideoCapture(url_ir)
+        # Using videoSource for ZeroCopy
+        video_source_color = jetson.utils.videoSource(url_color, argv=["--input-codec=h264", "--input-rtsp-transport=tcp"])
+        video_source_ir = jetson.utils.videoSource(url_ir, argv=["--input-codec=h264", "--input-rtsp-transport=tcp"])
+
+        logging.info(f"Capture loop started for {cam_model} at {cam_ip}")
 
         while engine._run_flag:
-            ret_c, frame_c = cap_c.read()
-            ret_i, frame_i = cap_i.read()
+            try:
+                # Capture next frames
+                # These are CUDA capsules (ZeroCopy)
+                img_color = video_source_color.Capture(timeout=1000)
+                img_ir = video_source_ir.Capture(timeout=1000)
 
-            if ret_c and ret_i:
-                # Limit queue size to prevent memory leaks if engine falls behind
-                if len(engine.frame_queue) < 10:
-                    engine.frame_queue.append((frame_c, frame_i))
-            else:
-                time.sleep(0.1) # Wait on network lag
-                # Attempt reconnect logic here in prod
+                if img_color and img_ir:
+                    engine.enqueue_frames(img_color, img_ir)
+                else:
+                    # Possible timeout or disconnect
+                    time.sleep(0.1)
+            except Exception as e:
+                logging.error(f"Capture error: {e}")
+                time.sleep(1.0) # Backoff
 
     alpr_engine_instance = ALPREngineThread()
 
@@ -67,37 +119,42 @@ async def lifespan(app: FastAPI):
     config = load_config()
     cameras = config.get("cameras", [])
     if cameras:
-        cam1 = cameras[0] # Just primary camera for now as requested
+        cam1 = cameras[0]
         threading.Thread(target=capture_loop, args=(alpr_engine_instance, cam1["ip"], cam1["model"]), daemon=True).start()
 
-    # Start Background Workers (TrueNAS Offload & Webhooks)
+    # Start Background Workers
     from background_workers import BackgroundWorkers
-    from config import load_config
-    config = load_config()
-
     bg_workers = BackgroundWorkers(config)
     bg_workers.start()
 
     yield
 
-    bg_workers.stop()
-
     # Shutdown logic
     logging.info("Shutting down Jetson Node Services...")
+    bg_workers.stop()
     if alpr_engine_instance:
         alpr_engine_instance.stop()
+
+    if video_source_color:
+        video_source_color.Close()
+        video_source_color = None
+    if video_source_ir:
+        video_source_ir.Close()
+        video_source_ir = None
 
 app = FastAPI(lifespan=lifespan)
 
 def broadcast_read(read_data, is_hit):
     """Callback triggered by ALPR engine when a new read occurs. Broadcasts via WebSocket."""
-    # Convert image paths to base64 or serve them via static route
     import base64
 
     def encode_image(filepath):
         if os.path.exists(filepath):
-            with open(filepath, "rb") as f:
-                return base64.b64encode(f.read()).decode('utf-8')
+            try:
+                with open(filepath, "rb") as f:
+                    return base64.b64encode(f.read()).decode('utf-8')
+            except Exception:
+                pass
         return ""
 
     payload = {
@@ -122,7 +179,7 @@ def broadcast_read(read_data, is_hit):
         loop = asyncio.get_running_loop()
         loop.create_task(send_ws_message(payload))
     except RuntimeError:
-        pass # Handle case where loop isn't running in this thread
+        pass
 
 async def send_ws_message(payload):
     import json
@@ -147,7 +204,6 @@ async def websocket_endpoint(websocket: WebSocket):
     logging.info(f"New MDT connected. Total clients: {len(connected_clients)}")
     try:
         while True:
-            # We don't expect much from the MDT over WS, just keeping connection alive
             data = await websocket.receive_text()
             if data == "ping":
                 await websocket.send_text("pong")
@@ -161,13 +217,11 @@ async def update_cameras(settings: dict):
     from config import load_config, save_config
     logging.info(f"Received new camera configuration: {settings}")
 
-    # Save the new config locally on the Jetson
     config = load_config()
     config["cameras"] = settings.get("cameras", [])
     save_config(config)
 
-    # NOTE: The simplest robust way to restart the capture threads and ALPR engine with new IP addresses
-    # is to let systemd restart the service. We will exit with status 0, and systemd `Restart=always` kicks in.
+    # Signal handlers and lifespan will handle clean shutdown on exit
     import sys
     loop = asyncio.get_running_loop()
     loop.call_later(1.0, sys.exit, 0)
@@ -177,7 +231,7 @@ async def update_cameras(settings: dict):
 @app.post("/api/settings/watchlist")
 async def upload_watchlist(file: UploadFile = File(...)):
     """MDT uploads new watchlist.csv"""
-    filepath = "watchlist.csv" # Save to root of jetson_node
+    filepath = "watchlist.csv"
     with open(filepath, "wb") as f:
         f.write(await file.read())
 
