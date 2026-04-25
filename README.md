@@ -14,7 +14,7 @@ To maximize performance in a vehicular environment, the suite utilizes a split-c
 ### 1. Download
 Clone this repository to your local machine:
 ```bash
-git clone https://github.com/your-org/SabrePatrolLPR.git
+git clone https://github.com/Kolden12/SabreALPR.git
 ```
 Alternatively, download the latest Release `.zip` from the Releases page.
 
