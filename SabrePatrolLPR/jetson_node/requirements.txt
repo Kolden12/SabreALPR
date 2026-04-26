@@ -2,6 +2,5 @@ fastapi
 uvicorn
 websockets
 opencv-python-headless
-paddleocr
-ultralytics
 python-multipart
+numpy
