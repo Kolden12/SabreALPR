@@ -1,70 +1,172 @@
-import sqlite3
+import psycopg2
+from psycopg2 import pool
 import os
-import threading
-from config import CONFIG_DIR
+import logging
+from dotenv import load_dotenv
 
-# DB path in the user's APPDATA folder (or local dir)
-DB_PATH = os.path.join(CONFIG_DIR, "sabre_lpr_history.db")
+load_dotenv()
+
+DB_NAME = os.getenv("DB_NAME", "sabre_alpr")
+DB_USER = os.getenv("DB_USER", "sabre_admin")
+DB_PASSWORD = os.getenv("DB_PASSWORD", "sabre_strong_password")
+DB_HOST = os.getenv("DB_HOST", "localhost")
+DB_PORT = os.getenv("DB_PORT", "5432")
 
 class DBManager:
     _instance = None
-    _lock = threading.Lock()
 
     def __new__(cls):
-        with cls._lock:
-            if cls._instance is None:
-                cls._instance = super(DBManager, cls).__new__(cls)
-                cls._instance._init_db()
+        if cls._instance is None:
+            cls._instance = super(DBManager, cls).__new__(cls)
+            cls._instance._init_pool()
+            cls._instance._init_db()
         return cls._instance
 
-    def _init_db(self):
-        self.conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-        self.cursor = self.conn.cursor()
-
-        # Create reads table
-        self.cursor.execute('''
-            CREATE TABLE IF NOT EXISTS reads (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                plate_text TEXT NOT NULL,
-                confidence_score REAL,
-                timestamp TEXT,
-                gps_coordinates TEXT,
-                image_path TEXT,
-                color_overview_path TEXT,
-                state TEXT,
-                make TEXT,
-                model TEXT,
-                color TEXT
+    def _init_pool(self):
+        try:
+            self.connection_pool = psycopg2.pool.SimpleConnectionPool(
+                1, 10,
+                database=DB_NAME,
+                user=DB_USER,
+                password=DB_PASSWORD,
+                host=DB_HOST,
+                port=DB_PORT
             )
-        ''')
-        self.conn.commit()
+            logging.info("PostgreSQL connection pool created successfully")
+        except Exception as e:
+            logging.error(f"Error creating PostgreSQL connection pool: {e}")
 
-    def insert_read(self, plate, conf, ts, gps, img_path, color_path, state, make, model, color):
-        with self._lock:
-            self.cursor.execute('''
-                INSERT INTO reads (
-                    plate_text, confidence_score, timestamp, gps_coordinates,
-                    image_path, color_overview_path, state, make, model, color
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (plate, conf, ts, gps, img_path, color_path, state, make, model, color))
-            self.conn.commit()
-            return self.cursor.lastrowid
+    def _init_db(self):
+        conn = self.connection_pool.getconn()
+        try:
+            with conn.cursor() as cur:
+                # plate_events table
+                cur.execute('''
+                    CREATE TABLE IF NOT EXISTS plate_events (
+                        event_id SERIAL PRIMARY KEY,
+                        camera_id TEXT NOT NULL,
+                        timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        high_res_path TEXT NOT NULL,
+                        thumbnail_path TEXT NOT NULL,
+                        plate_text TEXT,
+                        confidence REAL,
+                        is_processed BOOLEAN DEFAULT FALSE,
+                        is_hit BOOLEAN DEFAULT FALSE
+                    )
+                ''')
+                # hot_list table
+                cur.execute('''
+                    CREATE TABLE IF NOT EXISTS hot_list (
+                        plate_text TEXT PRIMARY KEY,
+                        description TEXT,
+                        added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                ''')
+                conn.commit()
+                logging.info("Database tables initialized successfully")
+        except Exception as e:
+            logging.error(f"Error initializing database: {e}")
+            conn.rollback()
+        finally:
+            self.connection_pool.putconn(conn)
 
-    def update_image_paths(self, old_path, new_path):
-        """Updates paths in bulk to avoid pulling entire DB into memory."""
-        with self._lock:
-            self.cursor.execute('''
-                UPDATE reads
-                SET image_path = ?
-                WHERE image_path = ?
-            ''', (new_path, old_path))
+    def insert_raw_event(self, camera_id, high_res_path, thumbnail_path):
+        conn = self.connection_pool.getconn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute('''
+                    INSERT INTO plate_events (camera_id, high_res_path, thumbnail_path)
+                    VALUES (%s, %s, %s) RETURNING event_id
+                ''', (camera_id, high_res_path, thumbnail_path))
+                event_id = cur.fetchone()[0]
+                conn.commit()
+                return event_id
+        except Exception as e:
+            logging.error(f"Error inserting raw event: {e}")
+            conn.rollback()
+            return None
+        finally:
+            self.connection_pool.putconn(conn)
 
-            self.cursor.execute('''
-                UPDATE reads
-                SET color_overview_path = ?
-                WHERE color_overview_path = ?
-            ''', (new_path, old_path))
-            self.conn.commit()
+    def update_processed_event(self, event_id, plate_text, confidence, is_hit, high_res_path=None):
+        conn = self.connection_pool.getconn()
+        try:
+            with conn.cursor() as cur:
+                if high_res_path:
+                    cur.execute('''
+                        UPDATE plate_events
+                        SET plate_text = %s, confidence = %s, is_hit = %s, is_processed = TRUE, high_res_path = %s
+                        WHERE event_id = %s
+                    ''', (plate_text, confidence, is_hit, high_res_path, event_id))
+                else:
+                    cur.execute('''
+                        UPDATE plate_events
+                        SET plate_text = %s, confidence = %s, is_hit = %s, is_processed = TRUE
+                        WHERE event_id = %s
+                    ''', (plate_text, confidence, is_hit, event_id))
+                conn.commit()
+        except Exception as e:
+            logging.error(f"Error updating processed event: {e}")
+            conn.rollback()
+        finally:
+            self.connection_pool.putconn(conn)
+
+    def get_unprocessed_events(self):
+        conn = self.connection_pool.getconn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute('''
+                    SELECT event_id, camera_id, high_res_path, thumbnail_path
+                    FROM plate_events
+                    WHERE is_processed = FALSE
+                    ORDER BY timestamp ASC
+                ''')
+                return cur.fetchall()
+        except Exception as e:
+            logging.error(f"Error getting unprocessed events: {e}")
+            return []
+        finally:
+            self.connection_pool.putconn(conn)
+
+    def check_hot_list(self, plate_text):
+        conn = self.connection_pool.getconn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute('SELECT 1 FROM hot_list WHERE plate_text = %s', (plate_text,))
+                return cur.fetchone() is not None
+        except Exception as e:
+            logging.error(f"Error checking hot list: {e}")
+            return False
+        finally:
+            self.connection_pool.putconn(conn)
+
+    def get_history(self, limit=50, offset=0):
+        conn = self.connection_pool.getconn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute('''
+                    SELECT event_id, camera_id, timestamp, high_res_path, thumbnail_path, plate_text, confidence, is_hit
+                    FROM plate_events
+                    WHERE is_processed = TRUE
+                    ORDER BY timestamp DESC
+                    LIMIT %s OFFSET %s
+                ''', (limit, offset))
+                columns = [desc[0] for desc in cur.description]
+                results = []
+                for row in cur.fetchall():
+                    d = dict(zip(columns, row))
+                    # Map filesystem paths to URLs for the frontend
+                    d['image_url'] = d['high_res_path'].replace("/mnt/nvme/sabre_data/crops", "/crops")
+                    d['thumb_url'] = d['thumbnail_path'].replace("/mnt/nvme/sabre_data/crops", "/crops")
+                    # Map 'plate_text' to 'plate' for UI consistency
+                    d['plate'] = d['plate_text']
+                    results.append(d)
+                return results
+        except Exception as e:
+            logging.error(f"Error getting history: {e}")
+            return []
+        finally:
+            self.connection_pool.putconn(conn)
 
     def close(self):
-        self.conn.close()
+        self.connection_pool.closeall()
