@@ -1,4 +1,5 @@
 import sys
+import requests
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QComboBox, QGroupBox, QFormLayout, QTableWidget,
@@ -99,7 +100,6 @@ class SettingsDialog(QDialog):
             QMessageBox.warning(self, "Error", "Please set and save the Jetson IP first.")
             return
 
-        import requests
         try:
             with open(filepath, 'rb') as f:
                 files = {'file': (filepath, f, 'text/csv')}
@@ -180,7 +180,6 @@ class SettingsDialog(QDialog):
         save_config(self.config)
 
         # Push config to Jetson Node
-        import requests
         jetson_ip = self.config.get("jetson_ip")
         if jetson_ip:
             try:
