@@ -1,0 +1,43 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:15
+    container_name: sabre_db
+    restart: always
+    environment:
+      POSTGRES_DB: ${DB_NAME:-sabre_alpr}
+      POSTGRES_USER: ${DB_USER:-sabre_admin}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-sabre_strong_password}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  api:
+    build: .
+    container_name: sabre_api
+    restart: always
+    depends_on:
+      - db
+    network_mode: host
+    volumes:
+      - /mnt/nvme/sabre_data:/mnt/nvme/sabre_data
+    environment:
+      - DB_HOST=localhost
+
+  watcher:
+    build: .
+    container_name: sabre_watcher
+    restart: always
+    command: python3 watcher_service.py
+    depends_on:
+      - db
+    network_mode: host
+    volumes:
+      - /mnt/nvme/sabre_data:/mnt/nvme/sabre_data
+    environment:
+      - DB_HOST=localhost
+
+volumes:
+  postgres_data:

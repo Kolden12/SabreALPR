@@ -4,3 +4,6 @@ websockets
 opencv-python-headless
 python-multipart
 numpy
+psycopg2-binary
+python-dotenv
+jetson-stats
