@@ -170,9 +170,10 @@ def broadcast_read(read_data, is_hit):
     from config import load_config
     config = load_config()
     unit_id = config.get("unit_id", "SABRE-JETSON")
-    webhook_url = "https://webhook.site/68467d43-3e4e-423c-981f-4e8a28121249"
-    webhook = WebhookIntegration(webhook_url, unit_id, "./archive")
-    webhook.send_payload(read_data, is_hit)
+    webhook_url = config.get("webhook_url", "")
+    if webhook_url:
+        webhook = WebhookIntegration(webhook_url, unit_id, "./archive")
+        webhook.send_payload(read_data, is_hit)
 
     # Create an asyncio task to broadcast
     try:

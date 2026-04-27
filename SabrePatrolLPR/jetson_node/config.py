@@ -27,6 +27,7 @@ logging.getLogger().addHandler(logging.StreamHandler(sys.stdout))
 DEFAULT_CONFIG = {
     "cameras": [], # List of dicts: {"model": "VSR-20", "ip": "192.168.1.100"}
     "unit_id": "SABRE-1",
+    "webhook_url": os.getenv("SABRE_WEBHOOK_URL", ""),
     "truenas_ip": "192.168.5.10",
     "truenas_user": "sabre_mounter",
     "truenas_password": ""
