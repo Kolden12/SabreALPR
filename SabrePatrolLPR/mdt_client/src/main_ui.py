@@ -2,19 +2,17 @@ import sys
 import os
 import websocket
 import json
-import base64
 import requests
 import time
 
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QLabel, QTableWidget, QTableWidgetItem, QHeaderView, QAction,
-    QFrame, QComboBox, QScrollArea, QPushButton, QDialog, QTabWidget,
+    QLabel, QAction,
+    QFrame, QScrollArea, QPushButton, QDialog, QTabWidget,
     QGridLayout, QProgressBar
 )
-from PyQt5.QtCore import Qt, pyqtSlot, QThread, pyqtSignal, QTimer, QSize, QObject
-from PyQt5.QtGui import QFont, QColor, QPixmap, QImage, QIcon
-from PyQt5.QtMultimedia import QSound
+from PyQt5.QtCore import Qt, pyqtSlot, QThread, pyqtSignal, QTimer, QObject
+from PyQt5.QtGui import QFont, QPixmap, QImage
 from PyQt5.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply
 from PyQt5.QtCore import QUrl
 

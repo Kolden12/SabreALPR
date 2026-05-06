@@ -7,7 +7,6 @@ from unittest.mock import MagicMock, patch
 # Add the current directory to sys.path to import local modules
 sys.path.append(os.path.dirname(__file__))
 
-import mock_jetson
 
 class TestSabreALPR(unittest.TestCase):
     def test_engine_initialization(self):
@@ -92,9 +91,8 @@ class TestSabreALPR(unittest.TestCase):
                 self.assertEqual(text, "TEST123")
 
     def test_main_imports(self):
-        from main import app, signal_handler
+        from main import app
         self.assertIsNotNone(app)
-        self.assertIsNotNone(signal_handler)
 
 if __name__ == '__main__':
     unittest.main()

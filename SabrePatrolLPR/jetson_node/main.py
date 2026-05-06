@@ -1,18 +1,15 @@
 import os
-import asyncio
 import logging
-import signal
-import sys
 import json
 import socket
 import time
+import csv
+import io
 from datetime import datetime
 from contextlib import asynccontextmanager
-from typing import List, Optional
-from fastapi import FastAPI, UploadFile, File, WebSocket, WebSocketDisconnect, Query, HTTPException
-from fastapi.responses import JSONResponse
+from typing import Optional
+from fastapi import FastAPI, UploadFile, File, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
 import uvicorn
 from jtop import jtop
 
@@ -27,7 +24,7 @@ connected_clients = set()
 camera_heartbeats = {} # {camera_id: last_timestamp}
 
 # Paths
-NVME_BASE_DIR = "/mnt/nvme/sabre_data/crops"
+NVME_BASE_DIR = os.getenv("NVME_BASE_DIR", "/mnt/nvme/sabre_data/crops")
 UNREAD_DIR = os.path.join(NVME_BASE_DIR, "unread")
 PROCESSED_DIR = os.path.join(NVME_BASE_DIR, "processed")
 
@@ -162,8 +159,6 @@ async def ir_kill(camera_id: Optional[str] = None):
 @app.post("/api/settings/hotlist")
 async def update_hotlist(file: UploadFile = File(...)):
     """Upload watchlist and migrate to PostgreSQL."""
-    import csv
-    import io
     content = await file.read()
     decoded = content.decode('utf-8')
     reader = csv.reader(io.StringIO(decoded))

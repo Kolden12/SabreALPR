@@ -1,7 +1,6 @@
-import sys
 import requests
 from PyQt5.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
+    QDialog, QVBoxLayout, QHBoxLayout, QLineEdit,
     QPushButton, QComboBox, QGroupBox, QFormLayout, QTableWidget,
     QTableWidgetItem, QHeaderView, QMessageBox, QFileDialog
 )
