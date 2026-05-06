@@ -1,6 +1,6 @@
 import cv2
 import time
-from PyQt5.QtCore import QThread, pyqtSignal, Qt
+from PyQt5.QtCore import QThread, pyqtSignal
 from PyQt5.QtGui import QImage
 
 class VideoStreamThread(QThread):

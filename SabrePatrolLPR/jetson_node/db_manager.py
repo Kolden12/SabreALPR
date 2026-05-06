@@ -1,5 +1,5 @@
 import psycopg2
-from psycopg2 import pool
+import psycopg2.pool
 import os
 import logging
 from dotenv import load_dotenv

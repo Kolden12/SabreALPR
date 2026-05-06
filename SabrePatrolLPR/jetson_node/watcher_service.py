@@ -1,10 +1,7 @@
 import os
 import time
 import logging
-import asyncio
-import json
-from datetime import datetime
-import threading
+import requests
 
 # Jetson imports
 try:
@@ -26,7 +23,7 @@ from db_manager import DBManager
 # Paths
 MODEL_DIR = os.path.join(os.path.dirname(__file__), "models")
 LPR_MODEL_PATH = os.path.join(MODEL_DIR, "lprnet.engine")
-NVME_BASE_DIR = "/mnt/nvme/sabre_data/crops"
+NVME_BASE_DIR = os.getenv("NVME_BASE_DIR", "/mnt/nvme/sabre_data/crops")
 PROCESSED_DIR = os.path.join(NVME_BASE_DIR, "processed")
 
 class WatcherService:
@@ -105,7 +102,6 @@ class WatcherService:
         # or a separate process that hits a local internal endpoint.
 
         # Let's go with the internal endpoint for decoupling.
-        import requests
         try:
             payload = {
                 "type": "alert",

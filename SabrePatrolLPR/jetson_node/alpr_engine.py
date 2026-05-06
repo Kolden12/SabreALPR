@@ -1,11 +1,10 @@
 import os
 import cv2
 import time
-import uuid
 import logging
+import csv
 from datetime import datetime
 import threading
-import numpy as np
 
 # Check if we are in a Jetson environment or mocking
 try:
@@ -217,7 +216,6 @@ class ALPREngineThread(threading.Thread):
                                 )
 
                             # Watchlist Check
-                            import csv
                             is_hit = False
                             if os.path.exists("watchlist.csv"):
                                 with open("watchlist.csv", 'r', encoding='utf-8') as f:

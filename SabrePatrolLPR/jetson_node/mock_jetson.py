@@ -80,6 +80,12 @@ def cudaAllocMapped(width, height, format):
 # Expose modules
 import sys
 from types import ModuleType
+from unittest.mock import MagicMock
+
+# Mock jtop before it's imported
+jtop_mod = ModuleType("jtop")
+jtop_mod.jtop = MagicMock()
+sys.modules["jtop"] = jtop_mod
 
 inference_mod = ModuleType("jetson.inference")
 inference_mod.detectNet = detectNet
